@@ -1,6 +1,6 @@
 const env = import.meta.env
 
-export const NEAR_RPC: string = env.VITE_NEAR_RPC ?? 'https://rpc.testnet.near.org'
+export const NEAR_RPC: string = env.VITE_NEAR_RPC ?? 'https://rpc.testnet.fastnear.com'
 export const FACTORY: string = env.VITE_FACTORY ?? 'afterkey.testnet'
 export const MPC = 'v1.signer-prod.testnet'
 export const SEPOLIA_RPC: string = env.VITE_SEPOLIA_RPC ?? 'https://ethereum-sepolia-rpc.publicnode.com'
