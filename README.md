@@ -6,7 +6,7 @@ Built on **NEAR Chain Signatures**. NEAR Hackathon 2026 · Open Innovation.
 
 | | |
 |---|---|
-| Live app (testnet) | **[LIVE_URL]** |
+| Live app (testnet) | **[(https://afterkey-kappa.vercel.app/#/)** |
 | Demo video | **[VIDEO_URL]** |
 | Factory contract | [`afterkey.afterkey.testnet`](https://testnet.nearblocks.io/address/afterkey.afterkey.testnet) |
 | MPC signer used | `v1.signer-prod.testnet` |
