@@ -1,0 +1,7 @@
+{
+  "name": "afterkey-alerts",
+  "private": true,
+  "type": "module",
+  "scripts": { "deploy": "wrangler deploy", "dev": "wrangler dev --test-scheduled" },
+  "devDependencies": { "wrangler": "^4" }
+}

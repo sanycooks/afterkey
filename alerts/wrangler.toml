@@ -1,0 +1,15 @@
+# Afterkey alerts on Cloudflare Workers (free tier). See alerts/README.md.
+name = "afterkey-alerts"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[triggers]
+crons = ["* * * * *"]   # every minute
+
+[[kv_namespaces]]
+binding = "KV"
+id = "PASTE_THE_ID_FROM_wrangler_kv_namespace_create"
+
+[vars]
+FACTORY = "afterkey.friend.testnet"   # your factory account
+NEAR_RPC = "https://rpc.testnet.near.org"

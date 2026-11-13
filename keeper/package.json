@@ -1,0 +1,13 @@
+{
+  "name": "afterkey-keeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Optional keeper: sends Afterkey scheduled transfers when their hold ends",
+  "scripts": { "start": "node keeper.mjs" },
+  "dependencies": {
+    "chainsig.js": "^1.1.16",
+    "near-api-js": "^6.5.1",
+    "viem": "^2.57.19"
+  }
+}
