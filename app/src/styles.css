@@ -62,7 +62,9 @@ input, select { font: inherit; color: var(--text); }
 .col { display: flex; flex-direction: column; gap: 12px; }
 .between { justify-content: space-between; }
 .center { align-items: center; }
-.grow { flex: 1 1 320px; min-width: 0; }
+.grow { min-width: 0; }
+/* Only grow sideways inside rows. In a column a flex-basis becomes a height, which made inputs 320px tall. */
+.row > .grow { flex: 1 1 280px; }
 
 .card { border: 1px solid var(--line); background: var(--panel); padding: 22px; display: flex; flex-direction: column; gap: 14px; }
 .card.plain { background: transparent; }

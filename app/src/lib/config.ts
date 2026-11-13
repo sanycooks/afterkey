@@ -24,3 +24,6 @@ export function telegramLink(role: 'owner' | 'guardian', ownerAccount: string): 
   const payload = (role === 'guardian' ? 'g' : 'o') + b64
   return payload.length <= 64 ? `https://t.me/${TELEGRAM_BOT}?start=${payload}` : `https://t.me/${TELEGRAM_BOT}`
 }
+
+/** Reown (WalletConnect) project ID. Public by design; protected by the allowed domains set in the Reown dashboard. */
+export const REOWN_PROJECT_ID: string = env.VITE_REOWN_PROJECT_ID ?? '2bfe5680e52ac9fe58e3514157b37cd1'

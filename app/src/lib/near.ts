@@ -71,6 +71,10 @@ export async function getState(will: string): Promise<WillState | null> {
   }
 }
 
+export function publicKeyOf(secretKey: string): string {
+  return KeyPair.fromString(secretKey as KeyPairString).getPublicKey().toString()
+}
+
 export function newKey() {
   const kp = KeyPair.fromRandom('ed25519')
   return { secretKey: kp.toString(), publicKey: kp.getPublicKey().toString() }

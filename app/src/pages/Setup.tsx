@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { formatUnits, parseEther } from 'viem'
 import { FACTORY, WALLET_PATHS } from '../lib/config'
-import { addFunctionKey, createWillAction, newKey, willDeposit } from '../lib/near'
-import { createVault } from '../lib/vault'
+import { addFunctionKey, createWillAction, getState, newKey, publicKeyOf, willDeposit } from '../lib/near'
+import { createVault, forgetVault, hasVault, unlock } from '../lib/vault'
 import { sendWithWallet } from '../lib/wallet'
 
 const DEMO = { alive: 120, grace: 60, hold: 30, lockdown: 90 }
@@ -51,8 +51,27 @@ export default function Setup({ account, will, onDone }: { account: string; will
     })
 
     const t = demo ? DEMO : REAL
-    const app = newKey()
-    const duress = duressPw ? newKey() : null
+    if (deposit === null) return setErr("Couldn't read the storage deposit from the factory")
+    if (await getState(will)) return onDone() // already created, e.g. the wallet finished after a reload
+
+    // A retry must reuse the first attempt's keys. New keys would overwrite the saved ones,
+    // and if the first attempt did create the will, this device would hold a key the will doesn't know.
+    let app: { secretKey: string; publicKey: string }
+    let duress: { secretKey: string; publicKey: string } | null = null
+    const retry = hasVault(account)
+    if (retry) {
+      const u = await unlock(account, pw)
+      if (!u || u.mode !== 'normal') return setErr('Setup was already started on this device. Enter the same app password you used then, or press "Start over".')
+      app = { secretKey: u.secretKey, publicKey: publicKeyOf(u.secretKey) }
+      if (duressPw) {
+        const d = await unlock(account, duressPw)
+        if (!d || d.mode !== 'duress') return setErr('Enter the same duress password you used the first time, or leave it empty.')
+        duress = { secretKey: d.secretKey, publicKey: publicKeyOf(d.secretKey) }
+      }
+    } else {
+      app = newKey()
+      duress = duressPw ? newKey() : null
+    }
     const args = {
       owner: account,
       owner_keys: [app.publicKey],
@@ -73,16 +92,15 @@ export default function Setup({ account, will, onDone }: { account: string; will
       demo,
     }
 
-    if (deposit === null) return setErr("Couldn't read the storage deposit from the factory")
     setBusy(true)
     try {
       // Save the encrypted keys first: browser wallets may redirect away from this page.
-      await createVault(
+      if (!retry) await createVault(
         account,
         will,
-        { secretKey: app.secretKey, password: pw },
-        duress ? { secretKey: duress.secretKey, password: duressPw } : undefined,
-      )
+          { secretKey: app.secretKey, password: pw },
+          duress ? { secretKey: duress.secretKey, password: duressPw } : undefined,
+        )
       const keyActions = [addFunctionKey(app.publicKey, will)]
       if (duress) keyActions.push(addFunctionKey(duress.publicKey, will))
       await sendWithWallet([
@@ -159,6 +177,9 @@ export default function Setup({ account, will, onDone }: { account: string; will
           {busy ? 'Waiting for your wallet…' : `Create will · ${deposit === null ? '…' : Number(formatUnits(deposit, 24)).toFixed(2)} NEAR storage`}
         </button>
         <span className="hint">Your wallet asks you to approve two things: adding the app keys, and creating the will.</span>
+        {hasVault(account) && (
+          <button className="btn" onClick={() => { forgetVault(account); setErr('Started over. Choose new passwords.') }}>Start over</button>
+        )}
       </div>
     </div>
   )

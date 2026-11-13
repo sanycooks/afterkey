@@ -14,7 +14,7 @@ import { sepolia } from 'viem/chains'
 import { utils as csUtils } from 'chainsig.js'
 
 const env = process.env
-const NEAR_RPC = env.NEAR_RPC ?? 'https://rpc.testnet.near.org'
+const NEAR_RPC = env.NEAR_RPC ?? 'https://rpc.testnet.fastnear.com'
 const SEPOLIA_RPC = env.SEPOLIA_RPC ?? 'https://ethereum-sepolia-rpc.publicnode.com'
 /** Where to learn which wills to look after: the alerts worker's /wills, or a comma list in WILLS. */
 const ALERTS_URL = env.ALERTS_URL

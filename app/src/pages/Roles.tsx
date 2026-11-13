@@ -11,26 +11,78 @@ import { sendWithWallet } from '../lib/wallet'
 import { F } from './Setup'
 import { describeChange } from './Owner'
 
-/** Pick a will by its owner's account (or the will account itself). */
-function WillPicker({ onPick, hint }: { onPick: (will: string) => void; hint: string }) {
-  const [v, setV] = useState(new URLSearchParams(location.hash.split('?')[1] ?? '').get('will') ?? '')
+type Role = 'guard' | 'heir'
+
+/** What each role can and can't do, shown before a will is opened. */
+const ROLE_INTRO: Record<Role, { lead: string; points: [string, string][] }> = {
+  guard: {
+    lead: "Someone trusts you to stop anyone from forcing them to empty their wallet. You can slow money down or let it through. You can never take it.",
+    points: [
+      ['Approve', 'A big send they really mean goes out now, instead of waiting 48 hours.'],
+      ['Cancel', "A send or a settings change that doesn't look like them is stopped."],
+      ['Lift a lockdown', 'If they used their duress password, you unfreeze the wallet once they are safe.'],
+    ],
+  },
+  heir: {
+    lead: "Someone named you to inherit their wallets. Nothing is yours while they're active, and nobody has to report anything if they're gone.",
+    points: [
+      ['While they are active', 'You see the countdown, nothing else. You cannot move anything.'],
+      ['If they go silent', 'After 30 days plus 7 days of grace, the will hands over by itself.'],
+      ['Then', 'You sign from the same addresses, with everything inside, including airdrops that land later.'],
+    ],
+  },
+}
+
+function lastKey(role: Role) {
+  return `afterkey:last:${role}`
+}
+
+/** Pick a will by its owner's account. Invite links (#/app?guard=alice.testnet) open it straight away. */
+function WillPicker({ role, onPick }: { role: Role; onPick: (will: string) => void }) {
+  const params = new URLSearchParams(location.hash.split('?')[1] ?? '')
+  const fromLink = params.get(role) ?? params.get('will')
+  const [v, setV] = useState(fromLink ?? localStorage.getItem(lastKey(role)) ?? '')
   const [err, setErr] = useState('')
-  async function go() {
+  const [busy, setBusy] = useState(false)
+  async function go(input = v) {
     setErr('')
-    const s = v.trim()
+    const s = input.trim()
+    if (!s) return
+    setBusy(true)
     try {
-      onPick(s.endsWith(`.${FACTORY}`) ? s : await willOf(s))
+      const will = s.endsWith(`.${FACTORY}`) ? s : await willOf(s)
+      localStorage.setItem(lastKey(role), s)
+      onPick(will)
     } catch {
       setErr("Couldn't find that will")
+    } finally {
+      setBusy(false)
     }
   }
+  useEffect(() => {
+    if (fromLink) go(fromLink)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const intro = ROLE_INTRO[role]
   return (
-    <form className="col" style={{ maxWidth: 520, gap: 12 }} onSubmit={(e) => { e.preventDefault(); go() }}>
-      <F label="The owner's NEAR account" value={v} set={setV} ph="alice.testnet" />
-      <span className="hint">{hint}</span>
+    <div className="col" style={{ gap: 26 }}>
+      <p className="sub" style={{ margin: 0, fontSize: 17, lineHeight: 1.6, maxWidth: 680 }}>{intro.lead}</p>
+      <div className="row" style={{ gap: 16 }}>
+        {intro.points.map(([t, d], i) => (
+          <div key={t} className="card plain grow" style={{ gap: 8 }}>
+            <span className="display ink" style={{ fontSize: 20 }}>0{i + 1}</span>
+            <b>{t}</b>
+            <span className="sub" style={{ fontSize: 14, lineHeight: 1.55 }}>{d}</span>
+          </div>
+        ))}
+      </div>
+      <form className="row" style={{ alignItems: 'flex-end', maxWidth: 680 }} onSubmit={(e) => { e.preventDefault(); go() }}>
+        <F label="The owner's NEAR account" value={v} set={setV} ph="alice.testnet" />
+        <button className="btn solid" disabled={!v || busy}>{busy ? 'Opening…' : 'Open their will'}</button>
+      </form>
+      <span className="hint">Tip: the owner can send you a link from their dashboard that opens this page with their will already filled in.</span>
       {err && <div className="err">{err}</div>}
-      <div><button className="btn solid" disabled={!v}>Open</button></div>
-    </form>
+    </div>
   )
 }
 
@@ -58,7 +110,7 @@ export function Guardian({ account }: { account: string }) {
   const acc = useMemo(() => (key ? keyAccount(account, key) : null), [account, key])
   const [msg, setMsg] = useState<{ ok: boolean; text: string; link?: string } | null>(null)
 
-  if (!will) return <Page title="Guarding a will"><WillPicker onPick={setWill} hint="You'll see this owner's held transfers and can approve or cancel them." /></Page>
+  if (!will) return <Page title="Guarding a will"><WillPicker role="guard" onPick={setWill} /></Page>
   if (state === undefined) return <Page title="Guarding a will"><p className="muted">Loading…</p></Page>
   if (state === null) return <Page title="Guarding a will"><div className="err">No will at {will}.</div></Page>
   if (!state.guardians.includes(account)) return <Page title="Guarding a will"><div className="err">{account} isn't a guardian of {state.owner}'s will.</div></Page>
@@ -173,7 +225,7 @@ export function Heir({ account }: { account: string }) {
     return () => clearInterval(t)
   }, [addr])
 
-  if (!will) return <Page title="Inheriting"><WillPicker onPick={setWill} hint="Enter the account of the person who named you as their heir." /></Page>
+  if (!will) return <Page title="Inheriting"><WillPicker role="heir" onPick={setWill} /></Page>
   if (state === undefined) return <Page title="Inheriting"><p className="muted">Loading…</p></Page>
   if (state === null) return <Page title="Inheriting"><div className="err">No will at {will}.</div></Page>
   const mine = state.wallets.filter((w) => w.heir === account)
@@ -254,7 +306,7 @@ export function Heir({ account }: { account: string }) {
 
 function Page({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="col" style={{ gap: 18, padding: '40px 0 80px', maxWidth: 900 }}>
+    <div className="col" style={{ gap: 18, padding: '40px 0 80px', maxWidth: 1000 }}>
       <h1 className="display" style={{ margin: 0, fontSize: 'clamp(28px, 4vw, 40px)' }}>{title}</h1>
       {children}
     </div>

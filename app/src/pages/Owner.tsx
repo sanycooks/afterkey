@@ -9,6 +9,7 @@ import { chainNowMs, useWill } from '../lib/useWill'
 import { createVault, unlock, type Unlocked } from '../lib/vault'
 import { sendWithWallet } from '../lib/wallet'
 import { F } from './Setup'
+import { Dapps } from './Dapps'
 
 // ------------------------------------------------------------------ unlock
 
@@ -87,6 +88,7 @@ export function Dashboard({ account, will, me }: { account: string; will: string
   const [ethAddr, setEthAddr] = useState<Hex | null>(null)
   const [bal, setBal] = useState<bigint | null>(null)
   const [toast, setToast] = useState<{ ok: boolean; text: string; link?: string } | null>(null)
+  const [recover, setRecover] = useState(false)
 
   useEffect(() => {
     deriveEthAddress(will, WALLET_PATHS.eth).then(setEthAddr).catch(() => setEthAddr(null))
@@ -119,10 +121,11 @@ export function Dashboard({ account, will, me }: { account: string; will: string
       setToast(r ? { ok: true, ...r } : { ok: true, text: `${label}: done` })
       refresh()
     } catch (e) {
-      setToast({ ok: false, text: e instanceof Error ? e.message : String(e) })
+      setToast({ ok: false, text: explain(e instanceof Error ? e.message : String(e)) })
     }
   }
 
+  if (recover) return <RecoverDevice account={account} will={will} />
   if (phase === 'handed_over') {
     return (
       <div className="col" style={{ padding: '60px 0', gap: 16, maxWidth: 640 }}>
@@ -146,6 +149,9 @@ export function Dashboard({ account, will, me }: { account: string; will: string
         <div className={toast.ok ? 'ok' : 'err'} role="status">
           {toast.text}{' '}
           {toast.link && <a href={toast.link} target="_blank" rel="noreferrer">view on explorer →</a>}
+          {!toast.ok && toast.text.includes("isn't registered") && (
+            <button className="btn" style={{ marginLeft: 10, minHeight: 34 }} onClick={() => setRecover(true)}>Request a new app key</button>
+          )}
         </div>
       )}
 
@@ -189,6 +195,10 @@ export function Dashboard({ account, will, me }: { account: string; will: string
           <a className="mono" style={{ fontSize: 13 }} href={telegramLink('owner', account)} target="_blank" rel="noreferrer">
             Get Telegram alerts →
           </a>
+          <div className="row" style={{ gap: 8 }}>
+            <CopyLink label="Copy guardian invite" url={`${location.origin}/#/app?guard=${account}`} />
+            <CopyLink label="Copy heir invite" url={`${location.origin}/#/app?heir=${account}`} />
+          </div>
         </div>
       </div>
 
@@ -215,6 +225,10 @@ export function Dashboard({ account, will, me }: { account: string; will: string
           acc={acc} will={will} from={ethAddr} state={state} duress={duress}
           onResult={(r) => { setToast(r); refresh() }}
         />
+      )}
+
+      {ethAddr && (
+        <Dapps acc={acc} will={will} from={ethAddr} state={state} duress={duress} onResult={(r) => { setToast(r); refresh() }} />
       )}
 
       <Queue acc={acc} will={will} pending={pending} chainNow={chainNow} run={run} />
@@ -483,6 +497,16 @@ function Safety({ acc, will, state, chainNow, spentWei, limitWei, run, duress }:
 
 // ------------------------------------------------------------------ helpers
 
+function CopyLink({ label, url }: { label: string; url: string }) {
+  const [done, setDone] = useState(false)
+  return (
+    <button className="btn" style={{ minHeight: 38, fontSize: 12 }}
+      onClick={() => navigator.clipboard.writeText(url).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) })}>
+      {done ? 'Copied ✓' : label}
+    </button>
+  )
+}
+
 export function fmtSecs(s: string | number) {
   const n = Number(s)
   if (n % 86400 === 0) return `${n / 86400} day${n === 86400 ? '' : 's'}`
@@ -517,6 +541,6 @@ function explain(msg: string) {
   if (msg.includes('needs_route:over_limit')) return "Over today's limit. Pick a route."
   if (msg.includes('needs_route:contract_call')) return 'Contract calls need a route.'
   if (msg.includes('locked')) return 'Locked. Only a guardian can lift it early.'
-  if (msg.includes('unregistered key')) return "This device's key isn't registered in your will."
+  if (msg.includes('unregistered key')) return "This device's key isn't registered in your will (usually because setup was submitted twice). Request a new app key: it activates after the hold, and your guardians are told."
   return msg
 }
