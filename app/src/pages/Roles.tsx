@@ -331,7 +331,7 @@ export function Heir({ account }: { account: string }) {
     }
   }
 
-  const grid = { gridTemplateColumns: 'minmax(0, 1fr) 160px 110px' }
+  const grid = { gridTemplateColumns: 'minmax(0, 1fr) minmax(70px, 160px) auto' }
   return (
     <Page title={`${state.owner} left you ${mine.length === 1 ? 'a wallet' : `${mine.length} wallets`}.`}>
       <span className="mono orange" style={{ fontSize: 12 }}>HANDED OVER · {new Date(handoverAt).toLocaleDateString()}</span>
@@ -361,7 +361,7 @@ export function Heir({ account }: { account: string }) {
                   <button className="btn" style={{ minHeight: 36, fontSize: 12 }} disabled={!acc || busy} onClick={() => moveToken(tk)}>Move</button>
                 </div>
               ))}
-              <div className="table-row" style={grid}><span className="muted">Positions, NFTs, airdrops</span><span className="muted mono" style={{ fontSize: 12 }}>in dApps</span><span className="muted" style={{ fontSize: 12 }}>use a dApp →</span></div>
+              <div className="table-row" style={grid}><span className="muted">NFTs, positions</span><span className="muted mono" style={{ fontSize: 12 }}>in dApps</span><span className="muted" style={{ fontSize: 12 }}>use a dApp →</span></div>
             </div>
             <div className="row" style={{ alignItems: 'flex-end' }}>
               <F label="Another token (contract address)" value={newToken} set={setNewToken} ph="0x…" />

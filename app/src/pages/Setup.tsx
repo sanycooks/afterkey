@@ -147,7 +147,7 @@ export default function Setup({ account, will, onDone }: { account: string; will
   }
 
   const choice = (on: boolean) => ({
-    textAlign: 'left' as const, padding: 18, cursor: 'pointer', display: 'flex', flexDirection: 'column' as const, gap: 6,
+    textAlign: 'left' as const, padding: 'clamp(10px, 3vw, 18px)', minWidth: 0, overflowWrap: 'anywhere' as const, cursor: 'pointer', display: 'flex', flexDirection: 'column' as const, gap: 6,
     border: `1px solid ${on ? 'var(--accent-ink)' : 'var(--line)'}`, background: on ? 'var(--sel)' : 'transparent', color: 'var(--text)',
   })
 
@@ -157,8 +157,8 @@ export default function Setup({ account, will, onDone }: { account: string; will
         {steps.map((s, i) => (
           <div key={s} className="col grow" style={{ flex: '1 1 0', gap: 8 }}>
             <div style={{ height: 4, background: i < step ? 'var(--accent-ink)' : i === step ? 'var(--text)' : 'var(--line)' }} />
-            <span style={{ color: i < step ? 'var(--accent-ink)' : i === step ? 'var(--text)' : 'var(--muted)', fontWeight: i === step ? 700 : 400 }}>
-              {i + 1} {s}{i < step ? ' ✓' : ''}
+            <span style={{ color: i < step ? 'var(--accent-ink)' : i === step ? 'var(--text)' : 'var(--muted)', fontWeight: i === step ? 700 : 400, whiteSpace: 'nowrap' }}>
+              {i + 1}<span className={i === step ? '' : 'step-name'}> {s}</span>{i < step ? ' ✓' : ''}
             </span>
           </div>
         ))}
@@ -180,9 +180,9 @@ export default function Setup({ account, will, onDone }: { account: string; will
             <p className="sub" style={{ margin: 0, fontSize: 16, lineHeight: 1.6 }}>If nothing comes from your wallets for this long, grace starts. Pick longer if you travel or might be in hospital.</p>
             {!demo && (<>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
-                {([[30, 'Active every month'], [90, 'Recommended'], [180, 'Rarely active']] as const).map(([d, note]) => (
+                {([[30, 'Active every month'], [90, 'Most people'], [180, 'Rarely active']] as const).map(([d, note]) => (
                   <button key={d} aria-pressed={aliveDays === d} onClick={() => setAliveDays(d)} style={choice(aliveDays === d)}>
-                    <b className="mono" style={{ fontSize: 22, color: aliveDays === d ? 'var(--accent-ink)' : undefined }}>{d} days</b>
+                    <b className="mono timer-days" style={{ color: aliveDays === d ? 'var(--accent-ink)' : undefined }}>{d} days</b>
                     <span className="sub" style={{ fontSize: 13 }}>{note}</span>
                   </button>
                 ))}

@@ -183,7 +183,7 @@ export function Dashboard({ account, will, me }: { account: string; will: string
     )
   }
 
-  const tabs: [typeof tab, string][] = [['send', 'Send'], ['dapps', 'Use in any dApp'], ['queue', `Waiting (${pending.length})`], ['safety', 'Safety settings']]
+  const tabs: [typeof tab, string, string][] = [['send', 'Send', 'Send'], ['dapps', 'Use in any dApp', 'dApps'], ['queue', `Waiting (${pending.length})`, `Waiting (${pending.length})`], ['safety', 'Safety settings', 'Safety']]
   const h2 = { margin: 0, fontSize: 20 }
 
   return (
@@ -303,7 +303,7 @@ export function Dashboard({ account, will, me }: { account: string; will: string
       </div>
 
       <div className="card plain" style={{ padding: 0, gap: 0 }}>
-        <div className="table-row mono muted" style={{ gridTemplateColumns: '60px 1.5fr 1fr 1fr', fontSize: 11, padding: '12px 20px' }}>
+        <div className="table-row mono muted wallet-row wallet-head" style={{ fontSize: 11 }}>
           <span>chain</span><span>address</span><span>balance</span><span>heir</span>
         </div>
         <WalletRow chain="ETH" address={ethAddr} href={ethAddr ? `${EXPLORER_ETH}/address/${ethAddr}` : undefined}
@@ -315,11 +315,11 @@ export function Dashboard({ account, will, me }: { account: string; will: string
       </div>
 
       <div className="col" style={{ gap: 16 }}>
-        <nav className="row" style={{ gap: 2, borderBottom: '1px solid var(--line)' }} aria-label="Wallet actions">
-          {tabs.map(([id, label]) => (
+        <nav className="tabs" aria-label="Wallet actions">
+          {tabs.map(([id, label, shortLabel]) => (
             <button key={id} className="btn" onClick={() => setTab(id)} aria-pressed={tab === id}
-              style={{ border: 0, borderBottom: `2px solid ${tab === id ? 'var(--accent-ink)' : 'transparent'}`, fontFamily: "'Inter Tight', system-ui, sans-serif", fontSize: 14, fontWeight: tab === id ? 600 : 400, color: tab === id ? 'var(--text)' : 'var(--sub)' }}>
-              {label}
+              style={{ border: 0, flex: 'none', whiteSpace: 'nowrap', borderBottom: `2px solid ${tab === id ? 'var(--accent-ink)' : 'transparent'}`, fontFamily: "'Inter Tight', system-ui, sans-serif", fontSize: 14, fontWeight: tab === id ? 600 : 400, color: tab === id ? 'var(--text)' : 'var(--sub)' }}>
+              <span className="label-long">{label}</span><span className="label-short">{shortLabel}</span>
             </button>
           ))}
         </nav>
@@ -342,13 +342,17 @@ function WalletRow({ chain, address, href, balance, net, heir, last }: {
   chain: string; address: string | null; href?: string; balance: string | null; net: string; heir?: string; last?: boolean
 }) {
   return (
-    <div className="table-row" style={{ gridTemplateColumns: '60px 1.5fr 1fr 1fr', padding: '12px 20px', borderBottom: last ? 0 : undefined }}>
-      <b>{chain}</b>
-      <span className="mono" style={{ fontSize: 13, wordBreak: 'break-all' }}>
-        {address ? <a href={href} target="_blank" rel="noreferrer">{address}</a> : <span className="muted">deriving…</span>}
+    <div className="table-row wallet-row" style={{ borderBottom: last ? 0 : undefined }}>
+      <b style={{ gridArea: 'chain' }}>{chain}</b>
+      <span className="mono" style={{ fontSize: 13, gridArea: 'addr', minWidth: 0 }}>
+        {address ? (
+          <a href={href} target="_blank" rel="noreferrer" title={address}>
+            <span className="addr-full">{address}</span><span className="addr-short">{short(address, 8)}</span>
+          </a>
+        ) : <span className="muted">deriving…</span>}
       </span>
-      <span className="mono">{balance ?? '…'} <small className="muted">{net}</small></span>
-      <span className="mono orange">{heir}</span>
+      <span className="mono" style={{ gridArea: 'bal' }}>{balance ?? '…'} <small className="muted">{net}</small></span>
+      <span className="mono orange" style={{ gridArea: 'heir', overflowWrap: 'anywhere' }}>{heir}</span>
     </div>
   )
 }

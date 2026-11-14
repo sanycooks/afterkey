@@ -133,8 +133,30 @@ input, select { font: inherit; color: var(--text); }
 .road-later .chip { color: var(--sub); border-style: dashed; }
 .road-more { align-self: flex-start; background: none; border: 0; padding: 0; color: var(--text); font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; }
 
+/* tabs scroll sideways instead of wrapping */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.timer-days { font-size: 22px; }
+.label-short { display: none; }
+
+/* wallets table: 4 columns on wide screens, stacked on small ones */
+.wallet-row { grid-template-columns: 60px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'chain addr bal heir'; padding: 12px 20px; }
+.addr-full { word-break: break-all; }
+.addr-short { display: none; }
+@media (max-width: 1100px) {
+  .addr-full { display: none; }
+  .addr-short { display: inline; }
+}
+
 @media (max-width: 760px) {
   .wrap { padding: 0 18px; }
+  .wallet-head { display: none !important; }
+  .step-name { display: none; }
+  .label-long { display: none; }
+  .label-short { display: inline; }
+  .tabs .btn { padding-left: 12px; padding-right: 12px; }
+  .timer-days { font-size: 17px; }
+  .wallet-row { grid-template-columns: 48px minmax(0, 1fr) auto; grid-template-areas: 'chain addr bal' '. heir heir'; padding: 12px 16px; row-gap: 4px; }
   .rule-row { grid-template-columns: 1fr auto; grid-template-areas: 'name live' 'text text'; row-gap: 8px; }
   .roadmap { grid-template-columns: 1fr; }
   .hide-sm { display: none !important; }
