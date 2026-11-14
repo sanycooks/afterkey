@@ -2,6 +2,7 @@
 
 :root,
 [data-theme='dark'] {
+  --on-red: #0a0b0a;
   --bg: #0a0b0a;
   --panel: #0f110f;
   --line: #2a2e2a;
@@ -21,6 +22,7 @@
   color-scheme: dark;
 }
 [data-theme='white'] {
+  --on-red: #ffffff;
   --bg: #ffffff;
   --panel: #f6f7f4;
   --line: #daddd6;

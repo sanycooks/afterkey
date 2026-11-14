@@ -7,6 +7,7 @@
 // Commands (the app's buttons fill these in through deep links):
 //   /start <owner account>   alerts for the owner: grace period, held transfers, new device keys
 //   /guard <owner account>   alerts for a guardian: all of that, plus duress lockdowns
+//   /heir <owner account>    one message for an heir, when the wallet becomes theirs (never during grace)
 //   /stop                    unsubscribe this chat
 //
 // Duress alerts go to guardians only, never to the owner's chat: if someone is
@@ -63,12 +64,12 @@ const say = (env, chatId, text) => tg(env, 'sendMessage', { chat_id: chatId, tex
 
 /** Deep links can't carry dots, so the app sends "o" or "g" + base64url(owner account). */
 function decodeDeepLink(arg) {
-  const m = /^([og])([A-Za-z0-9_-]+)$/.exec(arg ?? '')
+  const m = /^([ogh])([A-Za-z0-9_-]+)$/.exec(arg ?? '')
   if (!m) return null
   try {
     const b64 = m[2].replace(/-/g, '+').replace(/_/g, '/')
     const owner = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4))
-    return /^[a-z0-9._-]{2,64}$/.test(owner) ? { role: m[1] === 'g' ? 'guardian' : 'owner', owner } : null
+    return /^[a-z0-9._-]{2,64}$/.test(owner) ? { role: { g: 'guardian', h: 'heir', o: 'owner' }[m[1]], owner } : null
   } catch {
     return null
   }
@@ -84,10 +85,10 @@ async function onUpdate(u, env) {
     await env.KV.put('subs', JSON.stringify(subs.filter((s) => s.chatId !== chatId)))
     return say(env, chatId, 'Unsubscribed. Send /start <account> to watch a will again.')
   }
-  if (cmd !== '/start' && cmd !== '/guard') return
+  if (cmd !== '/start' && cmd !== '/guard' && cmd !== '/heir') return
 
   const link = cmd === '/start' ? decodeDeepLink(arg) : null
-  const role = link?.role ?? (cmd === '/guard' ? 'guardian' : 'owner')
+  const role = link?.role ?? (cmd === '/guard' ? 'guardian' : cmd === '/heir' ? 'heir' : 'owner')
   const target = link?.owner ?? arg
   if (!target) {
     return say(env, chatId, 'Send /start <your NEAR account> for your own will, or /guard <their NEAR account> if you are a guardian.')
@@ -102,7 +103,9 @@ async function onUpdate(u, env) {
   await env.KV.put('subs', JSON.stringify(next))
   return say(env, chatId, role === 'guardian'
     ? `You're watching ${state.owner}'s will as a guardian. You'll hear about held transfers, new device keys, the grace period, and duress lockdowns.`
-    : `You're watching your will. You'll hear before your grace period starts, when it starts, and about every held transfer or new device key.`)
+    : role === 'heir'
+      ? `Got it. If ${state.owner}'s wallets ever pass to you, you'll get one message here with what to do. Nothing before that.`
+      : `You're watching your will. You'll hear before your grace period starts, when it starts, and about every held transfer or new device key.`)
 }
 
 // ---------------------------------------------------------------- NEAR
@@ -161,6 +164,7 @@ async function checkWill(env, will, subs, seenAll) {
   const seen = (seenAll[will] ??= { phase: 'alive', pending: [], changes: [], locked: '0', warned: '' })
   const owners = subs.filter((x) => x.role === 'owner')
   const guards = subs.filter((x) => x.role === 'guardian')
+  const heirs = subs.filter((x) => x.role === 'heir')
   const out = []
   const toOwners = (t) => owners.forEach((x) => out.push([x.chatId, t]))
   const toGuards = (t) => guards.forEach((x) => out.push([x.chatId, t]))
@@ -180,6 +184,7 @@ async function checkWill(env, will, subs, seenAll) {
       toGuards(`${s.owner}'s will entered its grace period. Handover in ${dur(handoverAt - now)} unless they show activity. You may want to check on them.`)
     } else if (s.phase === 'handed_over') {
       ;[...owners, ...guards].forEach((x) => out.push([x.chatId, `${s.owner}'s will has handed over. Heirs can now sign from their wallets in the Afterkey app (Inheriting tab).`]))
+      heirs.forEach((x) => out.push([x.chatId, `${s.owner}'s wallets are now yours. Open the Afterkey app, go to Inheriting, enter ${s.owner}, and you can move everything or use the wallets in any dApp.${env.APP_URL ? ` ${env.APP_URL}/#/app?heir=${s.owner}` : ''}`]))
     }
     seen.phase = s.phase
   }

@@ -1,11 +1,11 @@
-import { createPublicClient, http, keccak256, serializeTransaction, type Hex } from 'viem'
+import { createPublicClient, encodeFunctionData, erc20Abi, http, keccak256, serializeTransaction, type Hex } from 'viem'
 import { sepolia } from 'viem/chains'
 import { chainAdapters, contracts, utils as csUtils, type MPCSignature } from 'chainsig.js'
-import { MPC, SEPOLIA_CHAIN_ID, SEPOLIA_RPC } from './config'
+import { MPC, NEAR_RPC, SEPOLIA_CHAIN_ID, SEPOLIA_RPC } from './config'
 
 export const client = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
 
-const csContract = new contracts.ChainSignatureContract({ networkId: 'testnet', contractId: MPC })
+export const csContract = new contracts.ChainSignatureContract({ networkId: 'testnet', contractId: MPC, fallbackRpcUrls: [NEAR_RPC] })
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const evm = new chainAdapters.evm.EVM({ publicClient: client as any, contract: csContract })
 
@@ -82,3 +82,36 @@ export async function broadcast(t: EthTxArgs, mpc: unknown): Promise<Hex> {
 }
 
 export const balanceOf = (address: Hex) => client.getBalance({ address })
+
+// ---- ERC-20 tokens (for heirs moving what they inherited)
+
+/** Common Sepolia test tokens; heirs can add any other token by address. */
+export const KNOWN_TOKENS: { symbol: string; address: Hex; decimals: number }[] = [
+  { symbol: 'USDC', address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', decimals: 6 },
+  { symbol: 'LINK', address: '0x779877A7B0D9E8603169DdbD7836e478b4624789', decimals: 18 },
+  { symbol: 'WETH', address: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', decimals: 18 },
+]
+
+export interface TokenBalance { symbol: string; address: Hex; decimals: number; balance: bigint }
+
+export async function tokenInfo(address: Hex): Promise<{ symbol: string; address: Hex; decimals: number }> {
+  const [symbol, decimals] = await Promise.all([
+    client.readContract({ address, abi: erc20Abi, functionName: 'symbol' }),
+    client.readContract({ address, abi: erc20Abi, functionName: 'decimals' }),
+  ])
+  return { symbol, address, decimals }
+}
+
+export async function tokenBalances(owner: Hex, tokens = KNOWN_TOKENS): Promise<TokenBalance[]> {
+  const out = await Promise.all(tokens.map(async (t) => {
+    const balance = await client.readContract({ address: t.address, abi: erc20Abi, functionName: 'balanceOf', args: [owner] }).catch(() => 0n)
+    return { ...t, balance }
+  }))
+  return out.filter((t) => t.balance > 0n)
+}
+
+export function transferData(to: Hex, amount: bigint): Hex {
+  return encodeFunctionData({ abi: erc20Abi, functionName: 'transfer', args: [to, amount] })
+}
+
+export const waitFor = (hash: Hex) => client.waitForTransactionReceipt({ hash })

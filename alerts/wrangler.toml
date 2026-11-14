@@ -13,3 +13,4 @@ id = "PASTE_THE_ID_FROM_wrangler_kv_namespace_create"
 [vars]
 FACTORY = "afterkey.friend.testnet"   # your factory account
 NEAR_RPC = "https://rpc.testnet.fastnear.com"
+APP_URL = "https://afterkey-kappa.vercel.app"   # your website, used in the heir message

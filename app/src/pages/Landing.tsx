@@ -224,6 +224,8 @@ export default function Landing() {
         <Rules title="the rules behind it" rows={[
           ['Daily limit', 'Everyday spending is instant. Anything above it, and any contract call, waits 48 hours, and you or a guardian can cancel.',
             <div key="b" style={{ height: 8, background: 'var(--track)', position: 'relative' }}><div style={{ height: 8, background: 'var(--accent-ink)', animation: 'ak-fillloop 4s ease-in-out infinite', width: '60%' }} /><div style={{ position: 'absolute', left: '60%', top: -5, width: 2, height: 18, background: 'var(--red)' }} /></div>],
+          ['Freeze now', 'One tap before a risky meetup, or the moment something feels wrong: nothing big can leave, and undoing it takes 48 hours.',
+            <span key="f" className="mono red" style={{ fontSize: 13 }}>{g < 6 ? 'frozen' : 'available: 0.00 ETH'}</span>],
           ['Duress password', 'A second password that pretends to work, locks everything for 7 days and alerts your guardians.',
             <span key="d" className="mono red" style={{ fontSize: 13 }}>{f >= 3 && f < 20 ? 'locked · guardians alerted' : 'armed'}</span>],
           ['Settings are slow too', 'Raising the limit or removing a guardian takes 48 hours. Tightening is instant. Nobody can make you switch protection off.',
@@ -240,10 +242,10 @@ export default function Landing() {
         <H2>Roadmap</H2>
         <div className="mono" style={{ fontSize: 14 }}>
           {[
-            ['Seedless wallets on ETH · activity as proof of life · grace · heir takeover · Telegram alerts', 'testnet now'],
-            ['48h hold · daily limit · duress key · scheduled sends · trusted addresses · guardian approval · device recovery', 'testnet now'],
-            ['SOL and BTC sends readable by the contract (today they always go through the hold) · guardian freeze · "protected" badge for X · staged handover with a monthly allowance · travel mode · last letters for heirs', 'next'],
-            ['Sealed will · claim links for heirs with no crypto · 2-of-3 heirs · sweep from an old MetaMask · audit, then mainnet', 'later'],
+            ['Seedless wallets on ETH, SOL and BTC · activity as proof of life · 30, 90 or 180-day timers · heirs take over tokens and use the wallet in any dApp · Telegram alerts for owners, guardians and heirs', 'testnet now'],
+            ['Daily limit · 48h hold · Freeze now · duress password with a guardian playbook · scheduled sends · trusted addresses · guardian approval · WalletConnect · device recovery', 'testnet now'],
+            ['Guardians can pause the clock (hospital, no signal) · 2-of-3 guardians · backup heir and % splits · private notes for heirs · early handover confirmed by a guardian · gas set aside for heirs', 'next'],
+            ['SOL and BTC sends the contract can read · message signing for dApp logins · sealed will (heirs hidden until handover) · claim links for heirs with no crypto · sweep from an old MetaMask · audit, then mainnet', 'later'],
           ].map(([what, when], i) => (
             <div key={what} className="table-row" style={{ gridTemplateColumns: '1fr 150px', borderTop: i === 0 ? '1px solid var(--text)' : undefined }}>
               <span>{what}</span>

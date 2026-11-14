@@ -13,12 +13,14 @@ type Route = 'instant' | 'trusted' | 'over_limit' | 'contract_call' | 'locked' |
 interface Session { topic: string; name: string; url: string }
 
 /** "Use in any dApp": WalletConnect, with every request going through the will's rules. */
-export function Dapps({ acc, will, from, state, duress, onResult }: {
+export function Dapps({ acc, will, from, state, duress, heir = false, onResult }: {
   acc: ReturnType<typeof keyAccount>
   will: string
   from: Hex
   state: WillState
   duress: boolean
+  /** Heirs sign with heir_sign: after the handover there are no limits or holds. */
+  heir?: boolean
   onResult: (r: { ok: boolean; text: string; link?: string }) => void
 }) {
   const [uri, setUri] = useState('')
@@ -71,7 +73,7 @@ export function Dapps({ acc, will, from, state, duress, onResult }: {
           return
         }
         setTx(t)
-        setRoute(await view<Route>(will, 'classify_eth', { path: WALLET_PATHS.eth, tx: t }))
+        setRoute(heir ? 'instant' : await view<Route>(will, 'classify_eth', { path: WALLET_PATHS.eth, tx: t }))
       } catch (e) {
         onResult({ ok: false, text: `Couldn't prepare the dApp's transaction: ${e instanceof Error ? e.message : e}` })
       }
@@ -113,7 +115,9 @@ export function Dapps({ acc, will, from, state, duress, onResult }: {
     try {
       const h = await view<string>(will, 'eth_signing_hash', { tx })
       if (`0x${h}` !== signingHash(tx)) throw new Error('Hash mismatch between app and contract. Not sending.')
-      const sig = await call<unknown>(acc, will, 'sign_eth', { path: WALLET_PATHS.eth, tx })
+      const sig = heir
+        ? await call<unknown>(acc, will, 'heir_sign', { path: WALLET_PATHS.eth, payload: h, domain_id: 0 })
+        : await call<unknown>(acc, will, 'sign_eth', { path: WALLET_PATHS.eth, tx })
       if (typeof sig === 'string' && sig.startsWith('queued:')) {
         await respondError(req, 'Held by Afterkey')
         onResult({ ok: true, text: 'Sent ✓' })
@@ -161,8 +165,9 @@ export function Dapps({ acc, will, from, state, duress, onResult }: {
         <span className="mono muted" style={{ fontSize: 12 }}>WalletConnect · Sepolia</span>
       </div>
       <span className="hint">
-        On the dApp, choose WalletConnect, copy its connection link, and paste it here. Its transactions follow your
-        will's rules: contract calls wait for the hold unless the contract is a trusted address or a guardian approves.
+        {heir
+          ? 'Withdraw positions, claim airdrops, swap. On the dApp, choose WalletConnect, copy its connection link, and paste it here.'
+          : "On the dApp, choose WalletConnect, copy its connection link, and paste it here. Its transactions follow your will's rules: contract calls wait for the hold unless the contract is a trusted address or a guardian approves."}
       </span>
       <div className="row" style={{ alignItems: 'flex-end' }}>
         <F label="Connection link (starts with wc:)" value={uri} set={setUri} ph="wc:…" />
@@ -213,7 +218,7 @@ export function Dapps({ acc, will, from, state, duress, onResult }: {
               </div>
               {(route === 'instant' || route === 'trusted') && (
                 <div className="row center">
-                  <span className="ok">{route === 'trusted' ? 'Trusted contract: instant.' : 'Inside your daily limit: instant.'}</span>
+                  <span className="ok">{heir ? 'Inherited wallet: you can sign anything.' : route === 'trusted' ? 'Trusted contract: instant.' : 'Inside your daily limit: instant.'}</span>
                   <button className="btn accent" disabled={busy} onClick={sendNow}>{busy ? 'Signing…' : 'Approve and send'}</button>
                   <button className="btn" disabled={busy} onClick={() => reject()}>Reject</button>
                 </div>

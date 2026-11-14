@@ -30,7 +30,7 @@ export default function AppPage() {
           <nav className="row" style={{ gap: 2, fontSize: 14 }}>
             {tabs.map(([id, label]) => (
               <button key={id} className="btn" onClick={() => setTab(id)}
-                style={{ border: 0, borderBottom: tab === id ? '2px solid var(--accent-ink)' : '2px solid transparent', fontFamily: 'Inter Tight', fontSize: 14, fontWeight: tab === id ? 600 : 400, color: tab === id ? 'var(--text)' : 'var(--sub)' }}>
+                style={{ border: 0, borderBottom: tab === id ? '2px solid var(--accent-ink)' : '2px solid transparent', fontFamily: "'Inter Tight', system-ui, sans-serif", fontSize: 14, fontWeight: tab === id ? 600 : 400, color: tab === id ? 'var(--text)' : 'var(--sub)' }}>
                 {label}
               </button>
             ))}

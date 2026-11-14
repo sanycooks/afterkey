@@ -6,7 +6,7 @@ import { createVault, forgetVault, hasVault, unlock } from '../lib/vault'
 import { sendWithWallet } from '../lib/wallet'
 
 const DEMO = { alive: 120, grace: 60, hold: 30, lockdown: 90 }
-const REAL = { alive: 30 * 86400, grace: 7 * 86400, hold: 48 * 3600, lockdown: 7 * 86400 }
+const REAL = { hold: 48 * 3600, lockdown: 7 * 86400 }
 
 export default function Setup({ account, will, onDone }: { account: string; will: string; onDone: () => void }) {
   const [heir, setHeir] = useState('')
@@ -15,7 +15,10 @@ export default function Setup({ account, will, onDone }: { account: string; will
   const [trusted, setTrusted] = useState('')
   const [limit, setLimit] = useState('0.05')
   const [decoy, setDecoy] = useState('0.002')
-  const [demo, setDemo] = useState(true)
+  const [demo, setDemo] = useState(false)
+  const [aliveDays, setAliveDays] = useState<30 | 90 | 180>(90)
+  const [graceDays, setGraceDays] = useState<7 | 14 | 30>(14)
+  const [step, setStep] = useState(0)
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
   const [duressPw, setDuressPw] = useState('')
@@ -50,7 +53,7 @@ export default function Setup({ account, will, onDone }: { account: string; will
       return { chain: 'Eth', address, label: `trusted ${i + 1}` }
     })
 
-    const t = demo ? DEMO : REAL
+    const t = demo ? DEMO : { ...REAL, alive: aliveDays * 86400, grace: graceDays * 86400 }
     if (deposit === null) return setErr("Couldn't read the storage deposit from the factory")
     if (await getState(will)) return onDone() // already created, e.g. the wallet finished after a reload
 
@@ -115,85 +118,159 @@ export default function Setup({ account, will, onDone }: { account: string; will
     }
   }
 
+  const steps = ['Heirs', 'Timer', 'Protection', 'Passwords', 'Review']
+  const timing = demo ? 'Demo: 2 min + 1 min grace' : `${aliveDays} days + ${graceDays} days grace`
+
+  function check(i: number): string {
+    if (i === 0) {
+      const h = heir.trim()
+      if (!h.includes('.')) return 'Enter your heir as a NEAR account, like amina.testnet'
+      if (h === account || btcHeir.trim() === account) return "You can't be your own heir"
+    }
+    if (i === 2) {
+      if (list(guardians).includes(account)) return "You can't be your own guardian"
+      try { parseEther(limit); parseEther(decoy) } catch { return 'Limit and decoy must be ETH amounts, like 0.05' }
+      const bad = list(trusted).find((a) => !/^0x[0-9a-fA-F]{40}$/.test(a))
+      if (bad) return `Not an ETH address: ${bad}`
+    }
+    if (i === 3) {
+      if (pw.length < 8) return 'Use an app password of at least 8 characters'
+      if (pw !== pw2) return "The two app passwords don't match"
+      if (duressPw && duressPw === pw) return 'The duress password must be different from the app password'
+    }
+    return ''
+  }
+  function next() {
+    const e = check(step)
+    setErr(e)
+    if (!e) setStep(step + 1)
+  }
+
+  const choice = (on: boolean) => ({
+    textAlign: 'left' as const, padding: 18, cursor: 'pointer', display: 'flex', flexDirection: 'column' as const, gap: 6,
+    border: `1px solid ${on ? 'var(--accent-ink)' : 'var(--line)'}`, background: on ? 'var(--sel)' : 'transparent', color: 'var(--text)',
+  })
+
   return (
-    <div className="col" style={{ gap: 28, padding: '40px 0 80px', maxWidth: 880 }}>
-      <div className="col" style={{ gap: 8 }}>
-        <h1 className="display" style={{ margin: 0, fontSize: 40 }}>Create your will</h1>
-        <p className="sub" style={{ margin: 0, fontSize: 16 }}>
-          Your will lives at <span className="mono">{will}</span>. It's created with no keys, so nobody, including
-          us, can change it after this.
-        </p>
+    <div className="col" style={{ gap: 28, padding: '32px 0 80px', maxWidth: 1100 }}>
+      <div className="row mono" style={{ gap: 8, fontSize: 12 }} aria-label={`Step ${step + 1} of 5`}>
+        {steps.map((s, i) => (
+          <div key={s} className="col grow" style={{ flex: '1 1 0', gap: 8 }}>
+            <div style={{ height: 4, background: i < step ? 'var(--accent-ink)' : i === step ? 'var(--text)' : 'var(--line)' }} />
+            <span style={{ color: i < step ? 'var(--accent-ink)' : i === step ? 'var(--text)' : 'var(--muted)', fontWeight: i === step ? 700 : 400 }}>
+              {i + 1} {s}{i < step ? ' ✓' : ''}
+            </span>
+          </div>
+        ))}
       </div>
 
-      <Section n="1" title="Who inherits">
-        <div className="row">
-          <F label="Heir of your ETH and SOL wallets" value={heir} set={setHeir} ph="amina.testnet" />
-          <F label="Heir of your BTC wallet (optional)" value={btcHeir} set={setBtcHeir} ph="same as above" />
-        </div>
-        <p className="hint">Heirs only need a NEAR account. They can't see or touch anything until the handover.</p>
-      </Section>
+      <div className="row" style={{ gap: 28, alignItems: 'flex-start' }}>
+        <div className="col grow fade-in" key={step} style={{ flex: '2 1 520px', gap: 20 }}>
+          {step === 0 && (<>
+            <h1 className="display" style={{ margin: 0, fontSize: 32 }}>Who gets your wallets?</h1>
+            <p className="sub" style={{ margin: 0, fontSize: 16, lineHeight: 1.6 }}>Heirs only need a NEAR account. They can't see or touch anything until the handover.</p>
+            <div className="row">
+              <F label="Heir of your ETH and SOL wallets" value={heir} set={setHeir} ph="amina.testnet" />
+              <F label="Heir of your BTC wallet (optional)" value={btcHeir} set={setBtcHeir} ph="same as above" />
+            </div>
+          </>)}
 
-      <Section n="2" title="Timing">
-        <div className="seg" role="group" aria-label="Timer mode">
-          <button aria-pressed={demo} onClick={() => setDemo(true)}>Demo timers (minutes)</button>
-          <button aria-pressed={!demo} onClick={() => setDemo(false)}>Real: 30 days + 7 days grace</button>
-        </div>
-        <p className="hint">
-          {demo
-            ? 'Demo: grace starts after 2 minutes of silence, handover 1 minute later. Big sends hold for 30s. Use this to show the whole flow live.'
-            : 'Real: grace starts after 30 days with no activity, handover 7 days later. Big sends hold for 48 hours.'}
-        </p>
-      </Section>
+          {step === 1 && (<>
+            <h1 className="display" style={{ margin: 0, fontSize: 32 }}>How long before it hands over?</h1>
+            <p className="sub" style={{ margin: 0, fontSize: 16, lineHeight: 1.6 }}>If nothing comes from your wallets for this long, grace starts. Pick longer if you travel or might be in hospital.</p>
+            {!demo && (<>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+                {([[30, 'Active every month'], [90, 'Recommended'], [180, 'Rarely active']] as const).map(([d, note]) => (
+                  <button key={d} aria-pressed={aliveDays === d} onClick={() => setAliveDays(d)} style={choice(aliveDays === d)}>
+                    <b className="mono" style={{ fontSize: 22, color: aliveDays === d ? 'var(--accent-ink)' : undefined }}>{d} days</b>
+                    <span className="sub" style={{ fontSize: 13 }}>{note}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="col" style={{ gap: 10 }}>
+                <span className="muted" style={{ fontSize: 14 }}>Grace period (Telegram warns you)</span>
+                <div className="seg" role="group" aria-label="Grace period">
+                  {([7, 14, 30] as const).map((d) => (
+                    <button key={d} aria-pressed={graceDays === d} onClick={() => setGraceDays(d)}>{d} days</button>
+                  ))}
+                </div>
+              </div>
+            </>)}
+            {demo && <div className="ok">Demo timers: grace after 2 minutes of silence, handover 1 minute later, big sends hold 30 seconds.</div>}
+            <button className="mono" onClick={() => setDemo(!demo)} style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: '10px 0', color: 'var(--accent-ink)', cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}>
+              {demo ? 'Use real timers instead' : 'Use demo timers (minutes) instead'}
+            </button>
+          </>)}
 
-      <Section n="3" title="Kidnap protection">
-        <div className="row">
-          <F label="Daily limit (ETH)" value={limit} set={setLimit} ph="0.05" />
-          <F label="Decoy amount under duress (ETH)" value={decoy} set={setDecoy} ph="0.002" />
-        </div>
-        <F label="Guardians (NEAR accounts, comma separated)" value={guardians} set={setGuardians} ph="rafi.testnet, noor.testnet" />
-        <F label="Trusted ETH addresses: your own Ledger, exchange deposit (optional)" value={trusted} set={setTrusted} ph="0x31Fa…08bD" />
-        <p className="hint">
-          Sends over the limit, and any contract call, wait {demo ? '30 seconds' : '48 hours'} unless they go to a
-          trusted address or a guardian approves. Guardians can approve or cancel. They can never take funds.
-        </p>
-      </Section>
+          {step === 2 && (<>
+            <h1 className="display" style={{ margin: 0, fontSize: 32 }}>If someone forces you</h1>
+            <p className="sub" style={{ margin: 0, fontSize: 16, lineHeight: 1.6 }}>
+              Sends over the limit, and any contract call, wait {demo ? '30 seconds' : '48 hours'} unless they go to a trusted address or a guardian approves.
+            </p>
+            <div className="row">
+              <F label="Daily limit (ETH)" value={limit} set={setLimit} ph="0.05" />
+              <F label="Decoy sent under duress (ETH)" value={decoy} set={setDecoy} ph="0.002" />
+            </div>
+            <F label="Guardians: NEAR accounts, comma separated. They can approve or cancel, never take." value={guardians} set={setGuardians} ph="rafi.testnet, noor.testnet" />
+            <F label="Trusted ETH addresses: your own Ledger or exchange (optional)" value={trusted} set={setTrusted} ph="0x…" />
+          </>)}
 
-      <Section n="4" title="Passwords on this device">
-        <div className="row">
-          <F label="App password" value={pw} set={setPw} type="password" />
-          <F label="Repeat app password" value={pw2} set={setPw2} type="password" />
-        </div>
-        <F label="Duress password (optional, must be different)" value={duressPw} set={setDuressPw} type="password" />
-        <p className="hint">
-          Each password unlocks its own key on this device. The duress password opens the app exactly like the real
-          one, sends only the decoy, locks everything and alerts your guardians. Nothing on your phone shows which
-          password is which.
-        </p>
-      </Section>
+          {step === 3 && (<>
+            <h1 className="display" style={{ margin: 0, fontSize: 32 }}>Passwords on this device</h1>
+            <p className="sub" style={{ margin: 0, fontSize: 16, lineHeight: 1.6 }}>
+              The duress password opens the app exactly like the real one, but only the decoy leaves, everything locks, and your guardians are alerted.
+            </p>
+            <div className="row">
+              <F label="App password" value={pw} set={setPw} type="password" />
+              <F label="Repeat app password" value={pw2} set={setPw2} type="password" />
+            </div>
+            <F label="Duress password (optional, must be different)" value={duressPw} set={setDuressPw} type="password" />
+          </>)}
 
-      {err && <div className="err">{err}</div>}
-      <div className="row center">
-        <button className="btn accent big" disabled={busy} onClick={submit}>
-          {busy ? 'Waiting for your wallet…' : `Create will · ${deposit === null ? '…' : Number(formatUnits(deposit, 24)).toFixed(2)} NEAR storage`}
-        </button>
-        <span className="hint">Your wallet asks you to approve two things: adding the app keys, and creating the will.</span>
-        {hasVault(account) && (
-          <button className="btn" onClick={() => { forgetVault(account); setErr('Started over. Choose new passwords.') }}>Start over</button>
-        )}
+          {step === 4 && (<>
+            <h1 className="display" style={{ margin: 0, fontSize: 32 }}>Ready to create your will</h1>
+            <p className="sub" style={{ margin: 0, fontSize: 16, lineHeight: 1.6 }}>
+              It lives at <span className="mono">{will}</span>, created with no keys, so nobody, including us, can change it after this. Your wallet asks you to approve two things.
+            </p>
+          </>)}
+
+          {err && <div className="err">{err}</div>}
+          <div className="row" style={{ gap: 12 }}>
+            {step > 0 && <button className="btn big" disabled={busy} onClick={() => { setErr(''); setStep(step - 1) }}>Back</button>}
+            {step < 4 ? (
+              <button className="btn accent big" onClick={next}>Next: {steps[step + 1].toLowerCase()}</button>
+            ) : (
+              <button className="btn accent big" disabled={busy} onClick={submit}>
+                {busy ? 'Waiting for your wallet…' : `Create will · ${deposit === null ? '…' : Number(formatUnits(deposit, 24)).toFixed(2)} NEAR`}
+              </button>
+            )}
+            {hasVault(account) && step === 4 && (
+              <button className="btn" onClick={() => { forgetVault(account); setErr('Started over. Choose new passwords.'); setStep(3) }}>Start over</button>
+            )}
+          </div>
+        </div>
+
+        <aside className="card grow" style={{ flex: '1 1 300px', gap: 10 }}>
+          <b style={{ fontSize: 15 }}>Your will so far</b>
+          <Line k="ETH + SOL" v={heir || '—'} orange />
+          <Line k="BTC" v={btcHeir || heir || '—'} orange />
+          <Line k="Hands over after" v={timing} />
+          <Line k="Daily limit" v={`${limit || '—'} ETH`} />
+          <Line k="Guardians" v={list(guardians).join(', ') || 'none'} />
+          <Line k="Duress password" v={duressPw ? 'set' : 'not set'} />
+          <Line k="Storage" v={deposit === null ? '…' : `${Number(formatUnits(deposit, 24)).toFixed(2)} NEAR`} last />
+        </aside>
       </div>
     </div>
   )
 }
 
-function Section({ n, title, children }: { n: string; title: string; children: React.ReactNode }) {
+function Line({ k, v, orange, last }: { k: string; v: string; orange?: boolean; last?: boolean }) {
   return (
-    <section className="card plain">
-      <div className="row center" style={{ gap: 12 }}>
-        <span className="display ink" style={{ fontSize: 22 }}>{n}</span>
-        <b style={{ fontSize: 17 }}>{title}</b>
-      </div>
-      {children}
-    </section>
+    <div className="row between" style={{ padding: '8px 0', borderBottom: last ? 0 : '1px solid var(--line)', fontSize: 14, gap: 10 }}>
+      <span className="muted">{k}</span>
+      <span className={`mono${orange ? ' orange' : ''}`} style={{ textAlign: 'right', wordBreak: 'break-all' }}>{v}</span>
+    </div>
   )
 }
 

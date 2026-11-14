@@ -6,7 +6,7 @@ Built on **NEAR Chain Signatures**. NEAR Hackathon 2026 · Open Innovation.
 
 | | |
 |---|---|
-| Live app (testnet) | **[(https://afterkey-kappa.vercel.app/#/)]** |
+| Live app (testnet) | **https://afterkey-kappa.vercel.app** |
 | Demo video | **[VIDEO_URL]** |
 | Factory contract | [`afterkey.afterkey.testnet`](https://testnet.nearblocks.io/address/afterkey.afterkey.testnet) |
 | MPC signer used | `v1.signer-prod.testnet` |
@@ -32,7 +32,7 @@ With NEAR Chain Signatures, an address on Ethereum, Solana or Bitcoin can be con
 So the will doesn't move anything. It changes **who the contract signs for**:
 
 - while you're active, it signs only for you, under anti-coercion rules;
-- once you've been silent for `alive + grace` (30 + 7 days), it signs only for your heir, forever.
+- once you've been silent for `alive + grace` (you pick 30, 90 or 180 days, plus 7, 14 or 30 days grace), it signs only for your heir, forever.
 
 Your heir gets the same address with everything in it. No seed phrase ever exists, so there's nothing to lose, leak, or force out of you.
 
@@ -80,13 +80,15 @@ Every transaction the owner signs is a heartbeat, so there's no check-in to forg
 
 | Rule | What it does |
 |---|---|
-| **Daily limit** | Plain ETH sends whose value **plus the maximum gas fee** fit today's limit are instant |
+| **Daily limit** | Plain ETH sends whose value **plus the maximum gas fee** fit today's limit are instant. The dashboard shows *available now* vs *protected* |
+| **Freeze now** | One tap sets the limit to 0 and removes trusted addresses. The contract applies tightening instantly; undoing it waits 48h |
 | **48h hold** | Over-limit sends and **every contract call** wait. You or a guardian can cancel |
 | **Trusted addresses** | Your own Ledger or exchange deposit: any amount, instantly. Adding one waits 48h |
 | **Guardians** | Approve a held send (it goes now), cancel it, block a settings change, lift a lockdown. Never take funds |
-| **Duress password** | Opens the app exactly like the real one. It signs at most **one** small decoy, locks the will for 7 days, and alerts guardians, never the owner's chat |
+| **Duress password** | Opens the app exactly like the real one. It signs at most **one** small decoy, locks the will for 7 days, and alerts guardians, never the owner's chat. Guardians get a 3-step playbook (call, code word, then lift) |
 | **Slow settings** | Tightening (remove a trusted address, lower the limit) is instant. Loosening waits 48h, so nobody can force you to turn protection off |
 | **Device recovery** | Lost the app key? Your normal wallet can request a new one. It waits 48h and guardians are alerted |
+| **Telegram alerts** | Owners hear before grace starts; guardians hear about held sends, new keys and duress; heirs get one message, only when the wallet becomes theirs. Free, runs on Cloudflare Workers |
 
 Moving a big amount yourself: **schedule it** (released after 48h), send to a **trusted address** (instant), or ask a **guardian** (instant).
 
@@ -116,20 +118,21 @@ near contract call-function as-read-only <owner>-testnet.afterkey.afterkey.testn
 
 You need three NEAR **testnet** accounts (create them free at [testnet.mynearwallet.com](https://testnet.mynearwallet.com)): an **owner** with ~1 NEAR, a **guardian**, and an **heir**. Use three browser profiles, because a browser holds one wallet login at a time.
 
-1. **Owner → create a will.** Open [LIVE_URL] → *Open app* → *Connect NEAR wallet*. Enter the heir and guardian accounts, choose **Demo timers** (2 min alive, 1 min grace, 30 s hold), set an app password and a different duress password. Approve both wallet requests.
+1. **Owner → create a will.** Open https://afterkey-kappa.vercel.app → *Open app* → *Connect NEAR wallet*. The setup wizard asks for the heir, the timer (on step 2 press **Use demo timers**: 2 min alive, 1 min grace, 30 s hold), the guardian and limits, then an app password and a different duress password. Approve both wallet requests.
 2. **Fund the wallet.** Unlock with the app password. Copy the ETH address on the dashboard and send it ~0.1 Sepolia ETH from any Sepolia faucet. Note the address: it belongs to a NEAR contract, and no private key exists for it.
 3. **Instant send.** Send 0.005 ETH anywhere. It's inside the daily limit, so it's signed by the MPC network and goes out immediately (explorer link shown).
 4. **Held send.** Send 0.06 ETH. It's over the 0.05 ETH daily limit, so the contract refuses to sign it instantly. Choose **Ask a guardian**.
 5. **Guardian approves.** In the guardian profile: *Guarding* tab → enter the owner's account → *Link* → **Approve now**. It goes out.
 6. **Duress.** In the owner profile, reload and unlock with the **duress** password. Send anything: the app says *Sent*, but only a tiny decoy can leave. The guardian's tab now shows the will **locked** with a warning.
-7. **Inheritance.** Leave the owner alone. The heartbeat flatlines into **grace** after 2 minutes and **hands over** 1 minute later. In the heir profile: *Inheriting* → enter the owner's account → *Link* → **Move everything to this address**. The ETH leaves from the **same address** the owner used.
+7. **Freeze.** On the owner's dashboard press **Freeze now**: *available now* drops to 0 at once. Raising the limit again waits for the hold.
+8. **Inheritance.** Leave the owner alone. The heartbeat flatlines into **grace** after 2 minutes and **hands over** 1 minute later. In the heir profile: *Inheriting* → enter the owner's account → *Link*. Move tokens one by one or **Move everything**, or connect the inherited wallet to a dApp. It all leaves from the **same address** the owner used.
 
 The landing page also plays this whole cycle on a 60-second loop. Use **Dark / White** and **Animations on/off** in the top bar.
 
 ## Repository
 
 ```
-contracts/will      the will (Rust, near-sdk 5): death clock, heirs, limits, hold, guardians, duress. 49 tests
+contracts/will      the will (Rust, near-sdk 5): death clock, heirs, limits, hold, guardians, duress. 49 tests (+5 in the factory = 54)
 contracts/factory   creates keyless wills that reference the will code by hash. 5 tests
 app/                React + Vite: landing page, owner / guardian / heir app, Dark/White, animations on/off
 alerts/             Telegram alerts on Cloudflare Workers' free tier. One deployment serves every user
@@ -156,15 +159,18 @@ VITE_FACTORY=afterkey.yourname.testnet VITE_TELEGRAM_BOT=YourBot npm run dev
 
 ## Limitations (honest list)
 
-- **SOL and BTC** wallets are in every will and pass to heirs, and heirs can sign from them. Sending from them as the *owner* isn't in the app yet, and the contract can't read SOL/BTC transactions, so it treats every owner SOL/BTC send as "large" (hold or guardian).
+- **SOL and BTC** wallets are in every will, shown with their balances, and pass to heirs; the contract lets heirs sign for them. Sending from them in the app (owner or heir) isn't built yet, and the contract can't read SOL/BTC transactions, so it treats every owner SOL/BTC send as "large" (hold or guardian).
+- **Message signing** (some dApps use it to log in) isn't supported: the will only signs transactions it can read.
 - **DeFi calls** (swaps, LP) always go through the hold or a guardian, unless the protocol is a trusted address. Trusting a router lets the app key route funds through it, so it's a deliberate owner choice.
 - **Assets must live in Afterkey wallets.** Nothing can take over an existing MetaMask, because its private key is the only way to control it.
 - **Unaudited, testnet.**
 
 ## Roadmap
 
-- **Next:** SOL and BTC sends readable by the contract · guardian freeze · "protected" badge for X profiles · staged handover with a monthly allowance first · travel mode · last letters for heirs
-- **Later:** sealed will (heirs hidden until handover) · claim links for heirs with no crypto · 2-of-3 heirs · sweep tokens and NFTs from an old MetaMask · audit, then mainnet
+Built so far runs on the deployed contract. The next items need a new contract version:
+
+- **Next:** guardians can pause the clock (hospital, no signal) · 2-of-3 guardians · backup heir and % splits · private notes for heirs · early handover confirmed by a guardian · gas set aside for heirs
+- **Later:** SOL and BTC sends the contract can read · message signing for dApp logins · sealed will (heirs hidden until handover) · claim links for heirs with no crypto · sweep from an old MetaMask · audit, then mainnet
 
 ## License
 

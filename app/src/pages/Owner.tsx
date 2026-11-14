@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatEther, parseEther, type Hex } from 'viem'
 import { Countdown, Pulse, short } from '../components/Chrome'
-import { EXPLORER_ETH, WALLET_PATHS, telegramLink } from '../lib/config'
+import { EXPLORER_BTC, EXPLORER_ETH, EXPLORER_SOL, WALLET_PATHS, telegramLink } from '../lib/config'
+import { btcWallet, solWallet, type ChainWallet } from '../lib/multichain'
 import { balanceOf, broadcast, buildTx, deriveEthAddress, maxFee, signingHash, type EthTxArgs } from '../lib/eth'
 import { addFunctionKey as addKey, call, keyAccount, newKey, nsToMs, recoverKeyAction, view, ContractError, type Pending, type WillState } from '../lib/near'
 import { useNow } from '../lib/prefs'
@@ -87,11 +88,25 @@ export function Dashboard({ account, will, me }: { account: string; will: string
   const duress = me.mode === 'duress'
   const [ethAddr, setEthAddr] = useState<Hex | null>(null)
   const [bal, setBal] = useState<bigint | null>(null)
+  const [sol, setSol] = useState<ChainWallet | null>(null)
+  const [btc, setBtc] = useState<ChainWallet | null>(null)
   const [toast, setToast] = useState<{ ok: boolean; text: string; link?: string } | null>(null)
   const [recover, setRecover] = useState(false)
+  const [tab, setTab] = useState<'send' | 'dapps' | 'queue' | 'safety'>('send')
+  const [preview, setPreview] = useState(false)
+  const [flags, setFlags] = useState(() => ({
+    tg: localStorage.getItem(`afterkey:tg:${account}`) === '1',
+    invited: localStorage.getItem(`afterkey:invited:${account}`) === '1',
+  }))
+  const flag = (k: 'tg' | 'invited') => {
+    localStorage.setItem(`afterkey:${k}:${account}`, '1')
+    setFlags((f) => ({ ...f, [k]: true }))
+  }
 
   useEffect(() => {
     deriveEthAddress(will, WALLET_PATHS.eth).then(setEthAddr).catch(() => setEthAddr(null))
+    solWallet(will, WALLET_PATHS.sol).then(setSol).catch(() => setSol(null))
+    btcWallet(will, WALLET_PATHS.btc).then(setBtc).catch(() => setBtc(null))
   }, [will])
   useEffect(() => {
     if (!ethAddr) return
@@ -109,10 +124,31 @@ export function Dashboard({ account, will, me }: { account: string; will: string
   const lockedUntil = nsToMs(state.locked_until)
   const locked = !duress && lockedUntil > chainNow
   const phase = chainNow >= handoverAt ? 'handed_over' : chainNow >= graceAt ? 'grace' : 'alive'
-  const color = phase === 'alive' ? 'var(--accent-ink)' : phase === 'grace' ? 'var(--amber)' : 'var(--orange)'
+  const color = phase === 'alive' ? 'var(--accent-ink)' : 'var(--amber)'
   const ethWallet = state.wallets.find((w) => w.path === WALLET_PATHS.eth)
   const spend = state.spend.find((s) => s.path === WALLET_PATHS.eth)
   const pending = state.pending.filter((p) => !(duress && p.status === 'DuressHeld'))
+
+  // What a forced send could take right now: what's left of today's limit, nothing while locked.
+  const limit = BigInt(ethWallet?.daily_limit ?? '0')
+  const left = limit - BigInt(spend?.spent_today ?? '0')
+  const balance = bal ?? 0n
+  const available = locked ? 0n : left <= 0n ? 0n : left < balance ? left : balance
+  const protectedWei = balance - available
+  const frozen = limit === 0n && state.trusted.length === 0
+
+  // Heirs grouped: "ETH + SOL wallets → amina.testnet"
+  const byHeir = new Map<string, string[]>()
+  for (const w of state.wallets) byHeir.set(w.heir, [...(byHeir.get(w.heir) ?? []), w.chain.toUpperCase()])
+
+  const checks: [string, boolean][] = [
+    ['Heirs set', state.wallets.length > 0],
+    ['Guardian set', state.guardians.length > 0],
+    ['Duress password', state.has_duress_key],
+    ['Telegram alerts', flags.tg],
+    ['Heir invited', flags.invited],
+  ]
+  const missing = checks.filter(([, ok]) => !ok).length
 
   async function run(label: string, fn: () => Promise<{ text: string; link?: string } | void>) {
     setToast({ ok: true, text: `${label}…` })
@@ -123,6 +159,15 @@ export function Dashboard({ account, will, me }: { account: string; will: string
     } catch (e) {
       setToast({ ok: false, text: explain(e instanceof Error ? e.message : String(e)) })
     }
+  }
+
+  function freeze() {
+    run('Freezing', async () => {
+      // Tightening applies at once in the contract; loosening it again waits for the hold.
+      await call(acc, will, 'propose', { change: { SetDailyLimit: { path: WALLET_PATHS.eth, limit: '0' } } }, 30n)
+      for (const t of state!.trusted) await call(acc, will, 'propose', { change: { RemoveTrusted: { address: t.address } } }, 30n)
+      return { text: `Frozen ✓ Nothing big can leave. Undoing it takes ${fmtSecs(state!.hold_secs)}.` }
+    })
   }
 
   if (recover) return <RecoverDevice account={account} will={will} />
@@ -137,6 +182,9 @@ export function Dashboard({ account, will, me }: { account: string; will: string
       </div>
     )
   }
+
+  const tabs: [typeof tab, string][] = [['send', 'Send'], ['dapps', 'Use in any dApp'], ['queue', `Waiting (${pending.length})`], ['safety', 'Safety settings']]
+  const h2 = { margin: 0, fontSize: 20 }
 
   return (
     <div className="col" style={{ gap: 20, padding: '24px 0 80px' }}>
@@ -155,88 +203,157 @@ export function Dashboard({ account, will, me }: { account: string; will: string
         </div>
       )}
 
+      <div className="row between center" style={{ border: '1px solid var(--line)', padding: '14px 20px' }}>
+        <span className="row center" style={{ gap: 12 }}>
+          <span className="dot" style={{ color: missing ? 'var(--amber)' : 'var(--accent-ink)' }} />
+          <b style={{ fontSize: 16 }}>{missing ? `Almost covered: ${missing} left` : "You're covered."}</b>
+        </span>
+        <span className="row mono sub" style={{ gap: 18, fontSize: 13 }}>
+          {checks.map(([label, ok]) => (
+            <span key={label}><span style={{ color: ok ? 'var(--accent-ink)' : 'var(--amber)' }}>{ok ? '✓' : '○'}</span> {label}</span>
+          ))}
+        </span>
+      </div>
+
       <div className="row" style={{ gap: 20 }}>
-        <div className="card" style={{ flex: '999 1 600px', minWidth: 0 }}>
-          <div className="row between center">
-            <span className="row center" style={{ gap: 12, color }}>
-              <span className="dot" />
-              <b className="display" style={{ fontSize: 15 }}>{phase === 'alive' ? 'Alive' : 'Grace period'}</b>
-            </span>
-            <span className="mono muted" style={{ fontSize: 12 }}>last activity {ago(chainNow - nsToMs(state.last_beat))}</span>
+        <section className="card grow" style={{ flex: '1 1 480px' }}>
+          <div className="row between" style={{ alignItems: 'baseline' }}>
+            <h2 className="display" style={h2}>If you disappear</h2>
+            <span className="mono muted" style={{ fontSize: 12 }}>your will</span>
           </div>
-          <Pulse height={100} color={color} flat={phase === 'grace'} speed={3.6} />
-          <div className="row between" style={{ alignItems: 'flex-end' }}>
+          <div className="row center" style={{ gap: 16 }}>
+            <div style={{ width: 170 }}><Pulse height={44} color={color} flat={phase === 'grace'} speed={3.6} /></div>
             <div>
-              <div className="muted" style={{ fontSize: 13 }}>
-                {phase === 'alive' ? 'Grace period starts if you stay silent for' : 'Your heirs take over in'}
-              </div>
-              <div className="mono" style={{ fontSize: 44, fontWeight: 700 }}>
+              <div className="muted" style={{ fontSize: 13 }}>{phase === 'alive' ? 'Alive · grace starts in' : 'Grace period · heirs take over in'}</div>
+              <div className="mono" style={{ fontSize: 26, fontWeight: 700, color: phase === 'grace' ? 'var(--amber)' : undefined }}>
                 <Countdown ms={(phase === 'alive' ? graceAt : handoverAt) - chainNow} />
               </div>
             </div>
-            <button className="btn" style={{ borderColor: 'var(--text)' }} onClick={() => run('Check-in', () => call(acc, will, 'heartbeat', {}, 30n).then(() => undefined))}>
-              Sign a manual check-in
-            </button>
           </div>
-        </div>
-
-        <div className="card plain" style={{ flex: '1 1 340px', minWidth: 0 }}>
-          <b>Your will</b>
-          <div className="mono" style={{ display: 'flex', height: 34, fontSize: 11, fontWeight: 700, color: '#0a0b0a' }}>
-            <div style={{ flex: 30, background: 'var(--accent)', padding: '0 8px', display: 'flex', alignItems: 'center' }}>{fmtSecs(state.alive_secs)}</div>
-            <div style={{ flex: 7, background: 'var(--amber-fill)', padding: '0 6px', display: 'flex', alignItems: 'center' }}>{fmtSecs(state.grace_secs)}</div>
-            <div style={{ flex: 12, background: 'var(--orange-fill)', padding: '0 6px', display: 'flex', alignItems: 'center' }}>heirs</div>
+          <div className="mono" style={{ display: 'flex', height: 26, fontSize: 11, fontWeight: 700, color: '#0a0b0a' }}>
+            <div style={{ flex: 6, background: 'var(--accent)', padding: '0 8px', display: 'flex', alignItems: 'center' }}>{fmtSecs(state.alive_secs)}</div>
+            <div style={{ flex: 2, background: 'var(--amber-fill)', padding: '0 6px', display: 'flex', alignItems: 'center' }}>{fmtSecs(state.grace_secs)} grace</div>
+            <div style={{ flex: 2, background: 'var(--orange-fill)', padding: '0 6px', display: 'flex', alignItems: 'center' }}>heirs</div>
           </div>
-          {state.wallets.map((w) => (
-            <div key={w.path} className="row between hr" style={{ padding: '8px 0', fontSize: 14 }}>
-              <span>{w.chain.toUpperCase()} wallet</span><span className="mono orange">{w.heir}</span>
+          <div className="col" style={{ gap: 0 }}>
+            {[...byHeir].map(([heir, chains]) => (
+              <div key={heir} className="row between hr" style={{ padding: '10px 0', fontSize: 14 }}>
+                <span>{chains.join(' + ')} wallet{chains.length > 1 ? 's' : ''}</span><span className="mono orange">{heir}</span>
+              </div>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <button className="btn" style={{ borderColor: 'var(--text)' }} onClick={() => run('Check-in', () => call(acc, will, 'heartbeat', {}, 30n).then(() => undefined))}>Check in</button>
+            <button className="btn" aria-expanded={preview} onClick={() => setPreview((p) => !p)}>See what your heir sees</button>
+            <CopyLink label="Copy heir invite" url={`${location.origin}/#/app?heir=${account}`} onCopy={() => flag('invited')} />
+          </div>
+          {preview && (
+            <div className="card fade-in" style={{ gap: 8 }}>
+              <span className="mono orange" style={{ fontSize: 12 }}>WHAT YOUR HEIR SEES AFTER THE HANDOVER</span>
+              <b>{account} left you {state.wallets.length} wallet{state.wallets.length > 1 ? 's' : ''}.</b>
+              <span className="sub" style={{ fontSize: 14 }}>
+                ETH {bal === null ? '' : `· ${Number(formatEther(bal)).toFixed(4)} ETH`}{sol?.balance != null ? ` · SOL ${sol.balance}` : ''}{btc?.balance != null ? ` · BTC ${btc.balance}` : ''}
+              </span>
+              <span className="sub" style={{ fontSize: 14 }}>They can move everything to their own wallet, or use these wallets in any dApp. Until then they see only the countdown.</span>
             </div>
-          ))}
-          <a className="mono" style={{ fontSize: 13 }} href={telegramLink('owner', account)} target="_blank" rel="noreferrer">
-            Get Telegram alerts →
-          </a>
-          <div className="row" style={{ gap: 8 }}>
-            <CopyLink label="Copy guardian invite" url={`${location.origin}/#/app?guard=${account}`} />
-            <CopyLink label="Copy heir invite" url={`${location.origin}/#/app?heir=${account}`} />
+          )}
+        </section>
+
+        <section className="card grow" style={{ flex: '1 1 480px' }}>
+          <div className="row between" style={{ alignItems: 'baseline' }}>
+            <h2 className="display" style={h2}>If you're forced</h2>
+            <span className="mono muted" style={{ fontSize: 12 }}>kidnap protection</span>
           </div>
-        </div>
+          <div className="row" style={{ gap: 24 }}>
+            <div className="grow" style={{ flex: '1 1 160px' }}>
+              <div className="muted" style={{ fontSize: 13 }}>Available now</div>
+              <div className="mono ink" style={{ fontSize: 28, fontWeight: 700 }}>{bal === null ? '…' : `${trim(formatEther(available))} ETH`}</div>
+            </div>
+            <div className="grow" style={{ flex: '1 1 160px' }}>
+              <div className="muted" style={{ fontSize: 13 }}>Protected ({fmtSecs(state.hold_secs)} hold)</div>
+              <div className="mono" style={{ fontSize: 28, fontWeight: 700 }}>{bal === null ? '…' : `${trim(formatEther(protectedWei))} ETH`}</div>
+            </div>
+          </div>
+          <div style={{ height: 10, background: 'var(--track)', display: 'flex' }}>
+            <div style={{ width: `${balance > 0n ? Number((available * 1000n) / balance) / 10 : 0}%`, background: 'var(--accent-ink)', transition: 'width .6s' }} />
+          </div>
+          <div className="col" style={{ gap: 0 }}>
+            <div className="row between hr" style={{ padding: '10px 0', fontSize: 14 }}>
+              <span>Guardians</span><span className="mono">{state.guardians.join(' · ') || 'none yet'}</span>
+            </div>
+            <div className="row between hr" style={{ padding: '10px 0', fontSize: 14 }}>
+              <span>Duress password</span><b className={state.has_duress_key ? 'ink' : 'muted'}>{state.has_duress_key ? 'set' : 'not set'}</b>
+            </div>
+          </div>
+          <div className="row center" style={{ gap: 14 }}>
+            {frozen ? (
+              <span className="mono red" style={{ fontSize: 14, fontWeight: 700 }}>Frozen</span>
+            ) : (
+              <button className="btn big" style={{ background: 'var(--red)', borderColor: 'var(--red)', color: 'var(--on-red)' }} onClick={freeze}>Freeze now</button>
+            )}
+            <span className="sub" style={{ fontSize: 13 }}>
+              {frozen ? `Raise the limit in Safety settings to unfreeze. It takes ${fmtSecs(state.hold_secs)}.` : `Nothing big can leave. Undoing it takes ${fmtSecs(state.hold_secs)}.`}
+            </span>
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <a className="btn" href={telegramLink('owner', account)} target="_blank" rel="noreferrer" onClick={() => flag('tg')}>Get Telegram alerts</a>
+            <CopyLink label="Copy guardian invite" url={`${location.origin}/#/app?guard=${account}`} />
+          </div>
+        </section>
       </div>
 
       <div className="card plain" style={{ padding: 0, gap: 0 }}>
-        <div className="table-row mono muted" style={{ gridTemplateColumns: '60px 1.4fr 1fr 1fr', fontSize: 11, padding: '12px 20px' }}>
+        <div className="table-row mono muted" style={{ gridTemplateColumns: '60px 1.5fr 1fr 1fr', fontSize: 11, padding: '12px 20px' }}>
           <span>chain</span><span>address</span><span>balance</span><span>heir</span>
         </div>
-        <div className="table-row" style={{ gridTemplateColumns: '60px 1.4fr 1fr 1fr', padding: '12px 20px' }}>
-          <b>ETH</b>
-          <span className="mono" style={{ fontSize: 13, wordBreak: 'break-all' }}>
-            {ethAddr ? <a href={`${EXPLORER_ETH}/address/${ethAddr}`} target="_blank" rel="noreferrer">{ethAddr}</a> : 'deriving…'}
-          </span>
-          <span className="mono">{bal === null ? '…' : `${Number(formatEther(bal)).toFixed(5)} ETH`} <small className="muted">Sepolia</small></span>
-          <span className="mono orange">{ethWallet?.heir}</span>
-        </div>
-        <div className="table-row muted" style={{ gridTemplateColumns: '60px 1fr', padding: '12px 20px', borderBottom: 0 }}>
-          <b>SOL · BTC</b>
-          <span style={{ fontSize: 13 }}>Wallets exist in your will and pass to your heirs. Sending from them in the app comes next; until then every SOL/BTC send would go through the hold.</span>
-        </div>
+        <WalletRow chain="ETH" address={ethAddr} href={ethAddr ? `${EXPLORER_ETH}/address/${ethAddr}` : undefined}
+          balance={bal === null ? null : `${trim(formatEther(bal))} ETH`} net="Sepolia" heir={ethWallet?.heir} />
+        <WalletRow chain="SOL" address={sol?.address ?? null} href={sol ? EXPLORER_SOL(sol.address) : undefined}
+          balance={sol?.balance == null ? null : `${sol.balance} SOL`} net="devnet" heir={state.wallets.find((w) => w.path === WALLET_PATHS.sol)?.heir} />
+        <WalletRow chain="BTC" address={btc?.address ?? null} href={btc ? EXPLORER_BTC(btc.address) : undefined}
+          balance={btc?.balance == null ? null : `${btc.balance} BTC`} net="testnet4" heir={state.wallets.find((w) => w.path === WALLET_PATHS.btc)?.heir} last />
       </div>
 
-      {ethAddr && ethWallet && (
-        <SendPanel
-          acc={acc} will={will} from={ethAddr} state={state} duress={duress}
-          onResult={(r) => { setToast(r); refresh() }}
-        />
-      )}
-
-      {ethAddr && (
-        <Dapps acc={acc} will={will} from={ethAddr} state={state} duress={duress} onResult={(r) => { setToast(r); refresh() }} />
-      )}
-
-      <Queue acc={acc} will={will} pending={pending} chainNow={chainNow} run={run} />
-
-      <Safety acc={acc} will={will} state={state} chainNow={chainNow} spentWei={spend?.spent_today} limitWei={ethWallet?.daily_limit} run={run} duress={duress} />
+      <div className="col" style={{ gap: 16 }}>
+        <nav className="row" style={{ gap: 2, borderBottom: '1px solid var(--line)' }} aria-label="Wallet actions">
+          {tabs.map(([id, label]) => (
+            <button key={id} className="btn" onClick={() => setTab(id)} aria-pressed={tab === id}
+              style={{ border: 0, borderBottom: `2px solid ${tab === id ? 'var(--accent-ink)' : 'transparent'}`, fontFamily: "'Inter Tight', system-ui, sans-serif", fontSize: 14, fontWeight: tab === id ? 600 : 400, color: tab === id ? 'var(--text)' : 'var(--sub)' }}>
+              {label}
+            </button>
+          ))}
+        </nav>
+        {tab === 'send' && ethAddr && ethWallet && (
+          <SendPanel acc={acc} will={will} from={ethAddr} state={state} duress={duress} onResult={(r) => { setToast(r); refresh() }} />
+        )}
+        {tab === 'dapps' && ethAddr && (
+          <Dapps acc={acc} will={will} from={ethAddr} state={state} duress={duress} onResult={(r) => { setToast(r); refresh() }} />
+        )}
+        {tab === 'queue' && (pending.length ? <Queue acc={acc} will={will} pending={pending} chainNow={chainNow} run={run} /> : <p className="muted" style={{ margin: 0 }}>Nothing waiting.</p>)}
+        {tab === 'safety' && (
+          <Safety acc={acc} will={will} state={state} chainNow={chainNow} spentWei={spend?.spent_today} limitWei={ethWallet?.daily_limit} run={run} duress={duress} />
+        )}
+      </div>
     </div>
   )
 }
+
+function WalletRow({ chain, address, href, balance, net, heir, last }: {
+  chain: string; address: string | null; href?: string; balance: string | null; net: string; heir?: string; last?: boolean
+}) {
+  return (
+    <div className="table-row" style={{ gridTemplateColumns: '60px 1.5fr 1fr 1fr', padding: '12px 20px', borderBottom: last ? 0 : undefined }}>
+      <b>{chain}</b>
+      <span className="mono" style={{ fontSize: 13, wordBreak: 'break-all' }}>
+        {address ? <a href={href} target="_blank" rel="noreferrer">{address}</a> : <span className="muted">deriving…</span>}
+      </span>
+      <span className="mono">{balance ?? '…'} <small className="muted">{net}</small></span>
+      <span className="mono orange">{heir}</span>
+    </div>
+  )
+}
+
+const trim = (s: string) => (s.includes('.') ? s.replace(/(\.\d{0,5})\d*$/, '$1').replace(/\.?0+$/, '') || '0' : s)
 
 // ------------------------------------------------------------------ send
 
@@ -345,7 +462,7 @@ function SendPanel({ acc, will, from, state, duress, onResult }: {
               style={{ justifyContent: 'flex-start', textAlign: 'left', padding: '12px 16px', flexDirection: 'column', alignItems: 'flex-start', background: pick === id ? 'var(--sel)' : 'transparent', borderColor: pick === id ? 'var(--accent-ink)' : 'var(--line)' }}
               onClick={() => setPick(id as typeof pick)}>
               <span style={{ fontSize: 14 }}>{title}</span>
-              <span className="sub" style={{ fontWeight: 400, fontFamily: 'Inter Tight', fontSize: 13 }}>{desc}</span>
+              <span className="sub" style={{ fontWeight: 400, fontFamily: "'Inter Tight', system-ui, sans-serif", fontSize: 13 }}>{desc}</span>
             </button>
           ))}
           <div>
@@ -497,11 +614,11 @@ function Safety({ acc, will, state, chainNow, spentWei, limitWei, run, duress }:
 
 // ------------------------------------------------------------------ helpers
 
-function CopyLink({ label, url }: { label: string; url: string }) {
+function CopyLink({ label, url, onCopy }: { label: string; url: string; onCopy?: () => void }) {
   const [done, setDone] = useState(false)
   return (
     <button className="btn" style={{ minHeight: 38, fontSize: 12 }}
-      onClick={() => navigator.clipboard.writeText(url).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) })}>
+      onClick={() => navigator.clipboard.writeText(url).then(() => { onCopy?.(); setDone(true); setTimeout(() => setDone(false), 1500) })}>
       {done ? 'Copied ✓' : label}
     </button>
   )

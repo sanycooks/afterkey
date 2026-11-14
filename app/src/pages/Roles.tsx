@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { formatEther, parseEther, type Hex } from 'viem'
+import { formatEther, formatUnits, type Hex } from 'viem'
 import { Countdown, Pulse, short } from '../components/Chrome'
-import { EXPLORER_ETH, FACTORY, WALLET_PATHS, telegramLink } from '../lib/config'
-import { balanceOf, broadcast, buildTx, deriveEthAddress, maxFee, signingHash } from '../lib/eth'
+import { EXPLORER_BTC, EXPLORER_ETH, EXPLORER_SOL, FACTORY, WALLET_PATHS, telegramLink } from '../lib/config'
+import { KNOWN_TOKENS, balanceOf, broadcast, buildTx, deriveEthAddress, maxFee, signingHash, tokenBalances, tokenInfo, transferData, waitFor, type EthTxArgs, type TokenBalance } from '../lib/eth'
+import { btcWallet, solWallet, type ChainWallet } from '../lib/multichain'
+import { Dapps } from './Dapps'
 import { addFunctionKey, call, keyAccount, newKey, nsToMs, willOf } from '../lib/near'
 import { useNow } from '../lib/prefs'
 import { chainNowMs, useWill } from '../lib/useWill'
@@ -109,6 +111,7 @@ export function Guardian({ account }: { account: string }) {
   const { key, link } = useRoleKey(account, will)
   const acc = useMemo(() => (key ? keyAccount(account, key) : null), [account, key])
   const [msg, setMsg] = useState<{ ok: boolean; text: string; link?: string } | null>(null)
+  const [done, setDone] = useState([false, false, false])
 
   if (!will) return <Page title="Guarding a will"><WillPicker role="guard" onPick={setWill} /></Page>
   if (state === undefined) return <Page title="Guarding a will"><p className="muted">Loading…</p></Page>
@@ -132,15 +135,24 @@ export function Guardian({ account }: { account: string }) {
     <Page title={`Guarding ${state.owner}`}>
       {msg && <div className={msg.ok ? 'ok' : 'err'}>{msg.text} {msg.link && <a href={msg.link} target="_blank" rel="noreferrer">view →</a>}</div>}
       {locked && (
-        <div className="card plain" style={{ borderColor: 'var(--red)' }}>
-          <b className="red">Locked by the duress password</b>
-          <p className="sub" style={{ margin: 0 }}>
-            {state.owner} used their duress password. They may be in danger right now. Check on them in person before
-            doing anything. Lifting the lock lets them send again.
-          </p>
-          <div className="row center">
-            <span className="mono amber">unlocks by itself in <Countdown ms={nsToMs(state.locked_until) - chainNow} /></span>
-            <button className="btn" disabled={!acc} onClick={() => run('Lifting lockdown', () => call(acc!, will, 'lift_lockdown', {}, 30n).then(() => undefined))}>Lift lockdown</button>
+        <div className="col" style={{ gap: 0 }}>
+          <div className="row between center" style={{ background: 'var(--red)', color: 'var(--on-red)', padding: '16px 20px' }}>
+            <b style={{ fontSize: 17 }}>{state.owner} used the duress password.</b>
+            <span className="mono" style={{ fontWeight: 700 }}>Locked · <Countdown ms={nsToMs(state.locked_until) - chainNow} /> left</span>
+          </div>
+          <div className="card plain" style={{ borderTop: 0 }}>
+            <b>What to do now</b>
+            {PLAYBOOK.map(([title, text], i) => (
+              <label key={title} className="row" style={{ gap: 12, alignItems: 'flex-start', fontSize: 15, lineHeight: 1.5, flexWrap: 'nowrap' }}>
+                <input type="checkbox" checked={done[i]} onChange={() => setDone((d) => d.map((x, j) => (j === i ? !x : x)))}
+                  style={{ width: 20, height: 20, marginTop: 2, accentColor: 'var(--accent-ink)', flex: 'none' }} />
+                <span><b>{title}</b> {text}</span>
+              </label>
+            ))}
+            <div className="row center">
+              <button className="btn" disabled={!acc || !done.every(Boolean)} onClick={() => run('Lifting lockdown', () => call(acc!, will, 'lift_lockdown', {}, 30n).then(() => undefined))}>Lift lockdown</button>
+              <span className="muted" style={{ fontSize: 13 }}>{done.every(Boolean) ? 'Only if they are safe.' : 'Unlocks after you tick all three.'}</span>
+            </div>
           </div>
         </div>
       )}
@@ -198,6 +210,12 @@ export function Guardian({ account }: { account: string }) {
   )
 }
 
+const PLAYBOOK: [string, string][] = [
+  ['Call them.', "Don't text. Hear their voice."],
+  ['Ask your code word.', "The one you agreed in person. A wrong answer or no answer means they're not safe."],
+  ["If you can't reach them,", 'contact family or the police. Approve nothing.'],
+]
+
 // ------------------------------------------------------------------ heir
 
 export function Heir({ account }: { account: string }) {
@@ -208,22 +226,34 @@ export function Heir({ account }: { account: string }) {
   const acc = useMemo(() => (key ? keyAccount(account, key) : null), [account, key])
   const [addr, setAddr] = useState<Hex | null>(null)
   const [bal, setBal] = useState<bigint | null>(null)
+  const [tokens, setTokens] = useState<TokenBalance[]>([])
+  const [extra, setExtra] = useState<{ symbol: string; address: Hex; decimals: number }[]>([])
+  const [newToken, setNewToken] = useState('')
+  const [sol, setSol] = useState<ChainWallet | null>(null)
+  const [btc, setBtc] = useState<ChainWallet | null>(null)
   const [to, setTo] = useState('')
-  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string; link?: string } | null>(null)
 
   const ethWallet = state?.wallets.find((w) => w.path === WALLET_PATHS.eth && w.heir === account)
+  const solMine = state?.wallets.some((w) => w.path === WALLET_PATHS.sol && w.heir === account)
+  const btcMine = state?.wallets.some((w) => w.path === WALLET_PATHS.btc && w.heir === account)
   useEffect(() => {
-    if (!will || !ethWallet) return
-    deriveEthAddress(will, WALLET_PATHS.eth).then(setAddr)
-  }, [will, ethWallet])
+    if (!will) return
+    if (ethWallet) deriveEthAddress(will, WALLET_PATHS.eth).then(setAddr)
+    if (solMine) solWallet(will, WALLET_PATHS.sol).then(setSol).catch(() => {})
+    if (btcMine) btcWallet(will, WALLET_PATHS.btc).then(setBtc).catch(() => {})
+  }, [will, ethWallet, solMine, btcMine])
   useEffect(() => {
     if (!addr) return
-    const load = () => balanceOf(addr).then(setBal).catch(() => {})
+    const load = () => {
+      balanceOf(addr).then(setBal).catch(() => {})
+      tokenBalances(addr, [...KNOWN_TOKENS, ...extra]).then(setTokens).catch(() => {})
+    }
     load()
-    const t = setInterval(load, 8000)
+    const t = setInterval(load, 10_000)
     return () => clearInterval(t)
-  }, [addr])
+  }, [addr, extra])
 
   if (!will) return <Page title="Inheriting"><WillPicker role="heir" onPick={setWill} /></Page>
   if (state === undefined) return <Page title="Inheriting"><p className="muted">Loading…</p></Page>
@@ -240,35 +270,72 @@ export function Heir({ account }: { account: string }) {
         <Pulse height={80} flat={chainNow >= nsToMs(state.grace_at)} color={chainNow >= nsToMs(state.grace_at) ? 'var(--amber)' : 'var(--accent-ink)'} />
         <div className="mono" style={{ fontSize: 13 }}>If they stay silent, handover in</div>
         <div className="mono" style={{ fontSize: 40, fontWeight: 700 }}><Countdown ms={handoverAt - chainNow} /></div>
+        <a className="btn" style={{ alignSelf: 'flex-start' }} href={telegramLink('heir', state.owner)} target="_blank" rel="noreferrer">Tell me on Telegram when it's mine</a>
       </Page>
     )
   }
 
-  async function send(all: boolean) {
-    if (!acc || !addr || !will) return
-    setMsg({ ok: true, text: 'Signing as heir…' })
+  /** Signs one transaction from the inherited ETH wallet and broadcasts it. */
+  async function sign(t: EthTxArgs) {
+    const sig = await call(acc!, will!, 'heir_sign', { path: WALLET_PATHS.eth, payload: signingHash(t).slice(2), domain_id: 0 })
+    return broadcast(t, sig)
+  }
+
+  async function moveToken(tk: TokenBalance) {
+    if (!acc || !addr) return
+    if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return setMsg({ ok: false, text: 'Enter the 0x… address to send to first' })
+    setBusy(true)
+    setMsg({ ok: true, text: `Moving ${tk.symbol}…` })
     try {
-      if (!/^0x[0-9a-fA-F]{40}$/.test(to)) throw new Error('Enter a 0x… ETH address')
-      let t = await buildTx(addr, to as Hex, all ? 0n : parseEther(amount || '0'))
-      if (all) {
-        const b = await balanceOf(addr)
-        t = { ...t, value: String(b - maxFee(t) > 0n ? b - maxFee(t) : 0n) }
+      const hash = await sign(await buildTx(addr, tk.address, 0n, transferData(to as Hex, tk.balance)))
+      setMsg({ ok: true, text: `${tk.symbol} sent ✓`, link: `${EXPLORER_ETH}/tx/${hash}` })
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function moveEverything() {
+    if (!acc || !addr) return
+    if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return setMsg({ ok: false, text: 'Enter the 0x… address to send to' })
+    setBusy(true)
+    try {
+      // Tokens first (they need ETH for gas), then whatever ETH is left.
+      for (const tk of tokens) {
+        setMsg({ ok: true, text: `Moving ${tk.symbol}…` })
+        await waitFor(await sign(await buildTx(addr, tk.address, 0n, transferData(to as Hex, tk.balance))))
       }
-      const sig = await call(acc, will, 'heir_sign', { path: WALLET_PATHS.eth, payload: signingHash(t).slice(2), domain_id: 0 })
-      const hash = await broadcast(t, sig)
-      setMsg({ ok: true, text: 'Sent from the inherited wallet ✓', link: `${EXPLORER_ETH}/tx/${hash}` })
+      setMsg({ ok: true, text: 'Moving ETH…' })
+      let t = await buildTx(addr, to as Hex, 0n)
+      const b = await balanceOf(addr)
+      t = { ...t, value: String(b - maxFee(t) > 0n ? b - maxFee(t) : 0n) }
+      const hash = await sign(t)
+      setMsg({ ok: true, text: 'Everything moved ✓', link: `${EXPLORER_ETH}/tx/${hash}` })
       refresh()
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function addToken() {
+    try {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(newToken)) throw new Error('Enter a token contract address')
+      const info = await tokenInfo(newToken as Hex)
+      setExtra((x) => [...x, info])
+      setNewToken('')
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) })
     }
   }
 
+  const grid = { gridTemplateColumns: 'minmax(0, 1fr) 160px 110px' }
   return (
     <Page title={`${state.owner} left you ${mine.length === 1 ? 'a wallet' : `${mine.length} wallets`}.`}>
-      <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>
-        Same addresses, same history. Everything inside is yours now, including anything that arrives later. Only you
-        can sign from them.
-      </p>
+      <span className="mono orange" style={{ fontSize: 12 }}>HANDED OVER · {new Date(handoverAt).toLocaleDateString()}</span>
+      <p className="sub" style={{ margin: 0, fontSize: 16 }}>Same addresses, everything inside. Only you can sign from them now.</p>
       {msg && <div className={msg.ok ? 'ok' : 'err'}>{msg.text} {msg.link && <a href={msg.link} target="_blank" rel="noreferrer">view →</a>}</div>}
       {!acc && (
         <div className="card plain">
@@ -277,32 +344,62 @@ export function Heir({ account }: { account: string }) {
           <div><button className="btn accent" onClick={() => link().catch((e) => setMsg({ ok: false, text: String(e) }))}>Link</button></div>
         </div>
       )}
-      {ethWallet && (
-        <div className="card plain">
-          <div className="row between center">
-            <b className="display" style={{ fontSize: 26 }}>ETH</b>
-            <span className="mono" style={{ fontSize: 13 }}>{addr ? <a href={`${EXPLORER_ETH}/address/${addr}`} target="_blank" rel="noreferrer">{addr}</a> : '…'}</span>
-          </div>
-          <div className="row between hr" style={{ padding: '8px 0' }}><span>Balance (Sepolia)</span><span className="mono">{bal === null ? '…' : `${formatEther(bal)} ETH`}</span></div>
-          <div className="row">
-            <F label="Send to" value={to} set={setTo} ph="0x… your own wallet" />
-            <F label="Amount (ETH)" value={amount} set={setAmount} ph="0.01" />
-          </div>
-          <div className="row">
-            <button className="btn solid" disabled={!acc || !to || !amount} onClick={() => send(false)}>Sign from this wallet</button>
-            <button className="btn" disabled={!acc || !to} onClick={() => send(true)}>Move everything to this address</button>
-          </div>
+
+      <div className="row" style={{ gap: 20, alignItems: 'flex-start' }}>
+        {ethWallet && (
+          <section className="card grow" style={{ flex: '1 1 520px' }}>
+            <div className="row between" style={{ alignItems: 'baseline' }}>
+              <b className="display" style={{ fontSize: 22 }}>ETH</b>
+              <span className="mono" style={{ fontSize: 13 }}>{addr ? <a href={`${EXPLORER_ETH}/address/${addr}`} target="_blank" rel="noreferrer">{short(addr, 8)}</a> : '…'}</span>
+            </div>
+            <div className="col" style={{ gap: 0 }}>
+              <div className="table-row" style={grid}><span>ETH</span><span className="mono">{bal === null ? '…' : trimNum(formatEther(bal))}</span><span className="muted" style={{ fontSize: 12 }}>moved last</span></div>
+              {tokens.map((tk) => (
+                <div key={tk.address} className="table-row" style={grid}>
+                  <span>{tk.symbol}</span>
+                  <span className="mono">{trimNum(formatUnits(tk.balance, tk.decimals))}</span>
+                  <button className="btn" style={{ minHeight: 36, fontSize: 12 }} disabled={!acc || busy} onClick={() => moveToken(tk)}>Move</button>
+                </div>
+              ))}
+              <div className="table-row" style={grid}><span className="muted">Positions, NFTs, airdrops</span><span className="muted mono" style={{ fontSize: 12 }}>in dApps</span><span className="muted" style={{ fontSize: 12 }}>use a dApp →</span></div>
+            </div>
+            <div className="row" style={{ alignItems: 'flex-end' }}>
+              <F label="Another token (contract address)" value={newToken} set={setNewToken} ph="0x…" />
+              <button className="btn" onClick={addToken} disabled={!newToken}>Add</button>
+            </div>
+            <div className="row" style={{ alignItems: 'flex-end' }}>
+              <F label="Send everything to" value={to} set={setTo} ph="0x… your own wallet" />
+              <button className="btn accent" disabled={!acc || !to || busy} onClick={moveEverything}>{busy ? 'Working…' : 'Move everything'}</button>
+            </div>
+          </section>
+        )}
+        <div className="col grow" style={{ flex: '1 1 380px', gap: 20 }}>
+          {ethWallet && addr && acc && (
+            <Dapps acc={acc} will={will} from={addr} state={state} duress={false} heir onResult={(r) => { setMsg(r); refresh() }} />
+          )}
+          {solMine && <ChainCard chain="SOL" w={sol} unit="SOL" href={sol ? EXPLORER_SOL(sol.address) : undefined} />}
+          {btcMine && <ChainCard chain="BTC" w={btc} unit="BTC" href={btc ? EXPLORER_BTC(btc.address) : undefined} />}
         </div>
-      )}
-      {mine.filter((w) => w.chain !== 'Eth').map((w) => (
-        <div key={w.path} className="card plain row between center" style={{ flexDirection: 'row' }}>
-          <b>{w.chain.toUpperCase()} wallet</b>
-          <span className="hint">Yours. Signing from it in the app comes next.</span>
-        </div>
-      ))}
+      </div>
     </Page>
   )
 }
+
+function ChainCard({ chain, w, unit, href }: { chain: string; w: ChainWallet | null; unit: string; href?: string }) {
+  return (
+    <div className="card plain row between center" style={{ flexDirection: 'row' }}>
+      <div className="col" style={{ gap: 4 }}>
+        <b className="display" style={{ fontSize: 18 }}>{chain}</b>
+        <span className="mono muted" style={{ fontSize: 13 }}>
+          {w ? <a href={href} target="_blank" rel="noreferrer">{short(w.address, 6)}</a> : 'deriving…'}{w?.balance != null ? ` · ${w.balance} ${unit}` : ''}
+        </span>
+      </div>
+      <span className="muted" style={{ fontSize: 13 }}>yours · moving it comes next</span>
+    </div>
+  )
+}
+
+const trimNum = (s: string) => (s.includes('.') ? s.replace(/(\.\d{0,6})\d*$/, '$1').replace(/\.?0+$/, '') || '0' : s)
 
 function Page({ title, children }: { title: string; children: React.ReactNode }) {
   return (
