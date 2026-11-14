@@ -121,7 +121,21 @@ input, select { font: inherit; color: var(--text); }
   transition: none !important;
 }
 
+.rule-row { grid-template-columns: minmax(140px, 240px) 1fr minmax(120px, 200px); grid-template-areas: 'name text live'; padding: 18px 0; }
+.roadmap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+.road-col { border: 1px solid var(--line); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.road-now { border-color: var(--accent-ink); }
+.road-next > div:first-child { color: var(--amber); }
+.road-later > div:first-child { color: var(--sub); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-size: 14px; padding: 10px 12px; border: 1px solid var(--line); color: var(--text); line-height: 1.2; }
+.road-now .chip { background: var(--sel); }
+.road-later .chip { color: var(--sub); border-style: dashed; }
+.road-more { align-self: flex-start; background: none; border: 0; padding: 0; color: var(--text); font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; }
+
 @media (max-width: 760px) {
   .wrap { padding: 0 18px; }
+  .rule-row { grid-template-columns: 1fr auto; grid-template-areas: 'name live' 'text text'; row-gap: 8px; }
+  .roadmap { grid-template-columns: 1fr; }
   .hide-sm { display: none !important; }
 }

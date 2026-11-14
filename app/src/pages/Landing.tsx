@@ -17,11 +17,11 @@ function useLoop() {
     }, 1000)
     return () => clearInterval(t)
   }, [motion])
-  return { s, block }
+  return { s, block, motion }
 }
 
 export default function Landing() {
-  const { s, block } = useLoop()
+  const { s, block, motion } = useLoop()
   const ph = s < 30 ? 0 : s < 50 ? 1 : 2
   const phase = ['ALIVE', 'GRACE', 'HANDED OVER'][ph]
   const phaseColor = ['var(--accent-ink)', 'var(--amber)', 'var(--orange)'][ph]
@@ -31,7 +31,7 @@ export default function Landing() {
   const playhead = s < 30 ? (s / 30) * 58.8 : s < 50 ? 58.8 + ((s - 30) / 20) * 13.7 : 72.5 + ((s - 50) / 10) * 27.5
   const seg = (i: number) => (ph === i ? 1 : 0.35)
   const k = Math.floor((s % 14) / 2)
-  const f = s % 24
+  const f = motion ? s % 24 : 23 // animations off: show the finished story
   const g = s % 12
 
   const assets: [string, string][] = [
@@ -71,7 +71,7 @@ export default function Landing() {
             <br />doesn't.
           </h1>
           <p className="sub" style={{ maxWidth: 560, fontSize: 19, lineHeight: 1.55, margin: 0 }}>
-            Use it like any wallet on ETH, SOL and BTC. Stop showing up for 37 days and the person you picked can sign
+            Use it like any wallet on ETH, SOL and BTC. Stop showing up for the time you choose (30, 90 or 180 days) and the person you picked can sign
             from it, with everything still inside. Get forced to send, and the big money waits.
           </p>
           <div className="row">
@@ -240,22 +240,8 @@ export default function Landing() {
 
       <section id="roadmap" className="wrap col" style={{ gap: 28, paddingTop: 140 }}>
         <H2>Roadmap</H2>
-        <div className="mono" style={{ fontSize: 14 }}>
-          {[
-            ['Seedless wallets on ETH, SOL and BTC · activity as proof of life · 30, 90 or 180-day timers · heirs take over tokens and use the wallet in any dApp · Telegram alerts for owners, guardians and heirs', 'testnet now'],
-            ['Daily limit · 48h hold · Freeze now · duress password with a guardian playbook · scheduled sends · trusted addresses · guardian approval · WalletConnect · device recovery', 'testnet now'],
-            ['Guardians can pause the clock (hospital, no signal) · 2-of-3 guardians · backup heir and % splits · private notes for heirs · early handover confirmed by a guardian · gas set aside for heirs', 'next'],
-            ['SOL and BTC sends the contract can read · message signing for dApp logins · sealed will (heirs hidden until handover) · claim links for heirs with no crypto · sweep from an old MetaMask · audit, then mainnet', 'later'],
-          ].map(([what, when], i) => (
-            <div key={what} className="table-row" style={{ gridTemplateColumns: '1fr 150px', borderTop: i === 0 ? '1px solid var(--text)' : undefined }}>
-              <span>{what}</span>
-              {when === 'testnet now' ? (
-                <b className="row center ink" style={{ gap: 8 }}><span className="dot" />{when}</b>
-              ) : (
-                <span className={when === 'next' ? 'amber' : 'muted'}>{when}</span>
-              )}
-            </div>
-          ))}
+        <div className="roadmap">
+          {ROADMAP.map(([when, label, items]) => <RoadCol key={when} when={when} label={label} items={items} />)}
         </div>
       </section>
 
@@ -288,15 +274,39 @@ function Flow({ color, delay }: { color: string; delay: number }) {
   )
 }
 
+const ROADMAP: ['now' | 'next' | 'later', string, string[]][] = [
+  ['now', 'Live on testnet', ['ETH, SOL, BTC wallets', 'No seed phrase', '30 / 90 / 180-day timers', 'Heir gets tokens', 'Heir uses dApps', 'Telegram alerts', 'Daily limit', '48h hold', 'Freeze now', 'Duress password', 'Guardian playbook', 'Trusted addresses', 'Guardian approval', 'Scheduled sends', 'WalletConnect', 'Device recovery']],
+  ['next', 'Next', ['Guardian pauses the clock', '2-of-3 guardians', 'Backup heir', '% splits', 'Notes for heirs', 'Early handover', 'Gas for heirs']],
+  ['later', 'Later', ['SOL & BTC sends', 'dApp login signing', 'Sealed will', 'Claim links', 'Sweep an old wallet', 'Audit', 'Mainnet']],
+]
+
+function RoadCol({ when, label, items }: { when: string; label: string; items: string[] }) {
+  const [open, setOpen] = useState(false)
+  const shown = open ? items : items.slice(0, 3)
+  return (
+    <div className={`road-col road-${when}`}>
+      <div className="row center mono" style={{ gap: 8, fontSize: 13, fontWeight: 700 }}>
+        {when === 'now' && <span className="dot" />}{label}
+      </div>
+      <div className="col" style={{ gap: 8 }}>
+        {shown.map((x) => <span key={x} className="chip">{x}</span>)}
+      </div>
+      {items.length > 3 && (
+        <button className="road-more mono" onClick={() => setOpen(!open)}>{open ? 'See less' : `See ${items.length - 3} more`}</button>
+      )}
+    </div>
+  )
+}
+
 function Rules({ title, rows }: { title: string; rows: [string, string, React.ReactNode][] }) {
   return (
     <div className="col" style={{ gap: 0, fontSize: 16 }}>
       <div className="mono muted" style={{ fontSize: 12, paddingBottom: 12, borderBottom: '1px solid var(--text)' }}>{title}</div>
       {rows.map(([name, text, live]) => (
-        <div key={name} className="table-row" style={{ gridTemplateColumns: 'minmax(140px, 240px) 1fr minmax(120px, 200px)', padding: '18px 0' }}>
-          <b style={{ fontWeight: 600 }}>{name}</b>
-          <span className="sub">{text}</span>
-          {live}
+        <div key={name} className="table-row rule-row">
+          <b style={{ fontWeight: 600, gridArea: 'name' }}>{name}</b>
+          <span className="sub" style={{ gridArea: 'text' }}>{text}</span>
+          <div style={{ gridArea: 'live', minWidth: 110 }}>{live}</div>
         </div>
       ))}
     </div>
